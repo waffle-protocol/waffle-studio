@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/cli"
-	"github.com/waffle-studio/waffle/internal/contracts"
 	"github.com/waffle-studio/waffle/internal/ui"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
@@ -97,22 +96,4 @@ func displayRequests() {
 	}
 
 	ui.RequestsFooter(boxWidth)
-}
-
-// mapStatusToUI converts contract status to ui status
-func mapStatusToUI(status uint8) uint8 {
-	switch status {
-	case contracts.StatusPending:
-		return ui.StatusPending
-	case contracts.StatusSubmitted:
-		return ui.StatusSubmitted
-	case contracts.StatusAccepted:
-		return ui.StatusAccepted
-	case contracts.StatusRejected:
-		return ui.StatusRejected
-	case contracts.StatusCancelled:
-		return ui.StatusCancelled
-	default:
-		return ui.StatusPending
-	}
 }
