@@ -1,0 +1,32 @@
+# Environment files (contain private keys!)
+.env
+.env.*
+*.env
+
+# Build outputs
+waffle/waffle
+waffle/out/
+waffle/cache/
+waffle/broadcast/
+
+# OS files
+.DS_Store
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Foundry
+foundry.lock
