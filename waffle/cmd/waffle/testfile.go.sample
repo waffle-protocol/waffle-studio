@@ -1,0 +1,10 @@
+package main
+
+// Handler for processing requests
+func oldHandler() {
+    return nil
+}
+
+func main() {
+    oldHandler()
+}

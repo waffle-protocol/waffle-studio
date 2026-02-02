@@ -1,0 +1,6 @@
+[submodule "waffle/lib/forge-std"]
+	path = waffle/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "waffle/lib/openzeppelin-contracts"]
+	path = waffle/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
