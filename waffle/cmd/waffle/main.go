@@ -5,14 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
-
-// ANSI color codes
-const (
-	ColorAmber = "\033[38;5;214m"
-	ColorBlue  = "\033[34m"
-	ColorBold  = "\033[1m"
-	ColorReset = "\033[0m"
+	"github.com/waffle-studio/waffle/internal/ui"
 )
 
 var rootCmd = &cobra.Command{
@@ -22,11 +15,11 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Server Rack style ASCII art
 		fmt.Println()
-		fmt.Printf("%s[ 🧇🧇🧇 ]%s  %sWAFFLE STACK%s online.\n", ColorAmber, ColorReset, ColorBold, ColorReset)
-		fmt.Printf("%s[ 🧇🍯🧇 ]%s  %sConnecting to P2P Grid...%s\n", ColorAmber, ColorReset, ColorBlue, ColorReset)
-		fmt.Printf("%s[ 🧇🧇🧇 ]%s  v0.1.0 ready.\n", ColorAmber, ColorReset)
+		fmt.Printf("%s[ 🧇🧇🧇 ]%s  %sWAFFLE STACK%s online.\n", ui.Amber, ui.Reset, ui.Bold, ui.Reset)
+		fmt.Printf("%s[ 🧇🍯🧇 ]%s  %sConnecting to P2P Grid...%s\n", ui.Amber, ui.Reset, ui.Blue, ui.Reset)
+		fmt.Printf("%s[ 🧇🧇🧇 ]%s  v0.1.0 ready.\n", ui.Amber, ui.Reset)
 		fmt.Println()
-		fmt.Printf("%s🥞 Waffle 스택이 활성화되었습니다.%s\n", ColorBold, ColorReset)
+		fmt.Printf("%s🥞 Waffle 스택이 활성화되었습니다.%s\n", ui.Bold, ui.Reset)
 		fmt.Println()
 	},
 }

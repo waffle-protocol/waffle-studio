@@ -1,16 +1,14 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strconv"
-	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
-	"github.com/waffle-studio/waffle/internal/config"
+	"github.com/waffle-studio/waffle/internal/cli"
 	"github.com/waffle-studio/waffle/internal/contracts"
+	"github.com/waffle-studio/waffle/internal/ui"
 )
 
 func init() {
@@ -25,7 +23,7 @@ var cancelCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requestID, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			fmt.Printf("%s❌ Invalid request ID: %s%s\n", "\033[31m", args[0], ColorReset)
+			cli.PrintErrorf("Invalid request ID: %s", args[0])
 			return
 		}
 
@@ -35,64 +33,46 @@ var cancelCmd = &cobra.Command{
 
 func cancelRequest(requestID int64) {
 	fmt.Println()
-	fmt.Printf("%s⏳ Cancelling request #%d...%s\n", ColorBlue, requestID, ColorReset)
+	cli.PrintLoading(fmt.Sprintf("Cancelling request #%d...", requestID))
 
-	// Load config
-	cfg, err := config.Load()
+	// Bootstrap with registry
+	ctx, err := cli.BootstrapWithRegistry()
 	if err != nil {
-		fmt.Printf("%s❌ Failed to load config: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintError(err.Error())
+		cli.PrintConfigHint()
 		return
 	}
+	defer ctx.Close()
 
-	if cfg.PrivateKey == "" || cfg.BakeRegistry == "" {
-		fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
-		fmt.Println("  Please set PRIVATE_KEY and BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
-		return
-	}
-
-	// Connect
-	client, err := ethclient.Dial(cfg.RPCURL)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-	defer client.Close()
-
-	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to setup registry: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeoutCtx, cancel := cli.WithTimeout()
 	defer cancel()
 
 	// Check request status first
-	req, err := registry.GetRequest(ctx, big.NewInt(requestID))
+	req, err := ctx.Registry.GetRequest(timeoutCtx, big.NewInt(requestID))
 	if err != nil {
-		fmt.Printf("%s❌ Failed to get request: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintErrorf("Failed to get request: %s", err)
 		return
 	}
 
 	if req.Status != contracts.StatusPending {
-		fmt.Printf("%s❌ Can only cancel PENDING requests (current status: %d)%s\n", "\033[31m", req.Status, ColorReset)
+		cli.PrintErrorf("Can only cancel PENDING requests (current status: %d)", req.Status)
 		return
 	}
 
 	// Cancel
-	receipt, err := registry.CancelRequest(ctx, big.NewInt(requestID))
+	receipt, err := ctx.Registry.CancelRequest(timeoutCtx, big.NewInt(requestID))
 	if err != nil {
-		fmt.Printf("%s❌ Cancel failed: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintErrorf("Cancel failed: %s", err)
 		return
 	}
 
+	// Display result box
+	box := ui.NewBox()
 	fmt.Println()
-	fmt.Printf("%s╔════════════════════════════════════════════════════╗%s\n", ColorBlue, ColorReset)
-	fmt.Printf("%s║%s %s🚫 REQUEST CANCELLED%s                                %s║%s\n", ColorBlue, ColorReset, ColorAmber+ColorBold, ColorReset, ColorBlue, ColorReset)
-	fmt.Printf("%s╠════════════════════════════════════════════════════╣%s\n", ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   Request ID: #%-37d%s║%s\n", ColorBlue, ColorReset, requestID, ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   💰 SYRUP refunded to your wallet                 %s║%s\n", ColorBlue, ColorReset, ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   🔗 Tx: %-42s %s║%s\n", ColorBlue, ColorReset, receipt.TxHash.Hex()[:42], ColorBlue, ColorReset)
-	fmt.Printf("%s╚════════════════════════════════════════════════════╝%s\n", ColorBlue, ColorReset)
+	box.Header("🚫 REQUEST CANCELLED")
+	box.Row(fmt.Sprintf("   Request ID: #%-37d", requestID))
+	box.Row("   💰 SYRUP refunded to your wallet")
+	box.Row(fmt.Sprintf("   🔗 Tx: %-42s", receipt.TxHash.Hex()[:42]))
+	box.Footer()
 	fmt.Println()
 }

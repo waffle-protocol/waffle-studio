@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/waffle-studio/waffle/internal/erc20"
 )
 
 // RegistryClient handles interaction with the BakeRegistry contract
@@ -33,10 +34,6 @@ const RegistryABI = `[
 	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"},{"name":"tokenUsage","type":"uint256"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]`
 
-// ERC20ApproveABI for approve function
-const ERC20ApproveABI = `[
-	{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
-]`
 
 // NewRegistryClient creates a new BakeRegistry instance
 func NewRegistryClient(address string, client *ethclient.Client, privateKeyHex string) (*RegistryClient, error) {
@@ -67,7 +64,7 @@ func HashCode(content string) [32]byte {
 
 // ApproveToken approves SYRUP tokens for the registry
 func (r *RegistryClient) ApproveToken(ctx context.Context, tokenAddress string, amount *big.Int) (*types.Receipt, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(ERC20ApproveABI))
+	parsedABI, err := abi.JSON(strings.NewReader(erc20.ApproveABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}

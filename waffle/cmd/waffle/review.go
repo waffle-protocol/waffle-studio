@@ -6,55 +6,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/patch"
-)
-
-// ============================================================================
-// Styling - Server Rack Theme (Blue/Amber/Diff Colors)
-// ============================================================================
-
-var (
-	// Review-specific styles
-	reviewTitleStyle = lipgloss.NewStyle().
-				Foreground(amberColor).
-				Bold(true)
-
-	reviewBorderStyle = lipgloss.NewStyle().
-				Foreground(blueColor)
-
-	reviewFileStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	// Diff line styles
-	addedLineStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")). // Green
-			Bold(true)
-
-	removedLineStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196")). // Red
-				Bold(true)
-
-	contextLineStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245")) // Gray
-
-	// Status indicators
-	acceptedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
-			Bold(true)
-
-	rejectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true)
-
-	pendingStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")).
-			Bold(true)
-
-	// Help bar
-	reviewHelpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
+	"github.com/waffle-studio/waffle/internal/ui"
 )
 
 // ============================================================================
@@ -269,100 +223,100 @@ func (m reviewModel) View() string {
 
 	// Header
 	b.WriteString("\n")
-	b.WriteString(reviewBorderStyle.Render("╔" + borderH + "╗"))
+	b.WriteString(ui.BorderStyle.Render("╔" + borderH + "╗"))
 	b.WriteString("\n")
 
 	// Title with hunk counter
 	title := fmt.Sprintf("📜 WAFFLE REVIEW                        [%d/%d hunks]",
 		m.currentIdx+1, len(m.hunks))
 	title = padRight(title, width-4)
-	b.WriteString(reviewBorderStyle.Render("║ "))
-	b.WriteString(reviewTitleStyle.Render(title))
-	b.WriteString(reviewBorderStyle.Render(" ║"))
+	b.WriteString(ui.BorderStyle.Render("║ "))
+	b.WriteString(ui.TitleStyle.Render(title))
+	b.WriteString(ui.BorderStyle.Render(" ║"))
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(reviewBorderStyle.Render("╠" + borderH + "╣"))
+	b.WriteString(ui.BorderStyle.Render("╠" + borderH + "╣"))
 	b.WriteString("\n")
 
 	// File info
 	fileInfo := fmt.Sprintf("File: %s (line %d)", hunk.FilePath, hunk.StartLine)
 	fileInfo = padRight(fileInfo, width-4)
-	b.WriteString(reviewBorderStyle.Render("║ "))
-	b.WriteString(reviewFileStyle.Render(fileInfo))
-	b.WriteString(reviewBorderStyle.Render(" ║"))
+	b.WriteString(ui.BorderStyle.Render("║ "))
+	b.WriteString(ui.FileStyle.Render(fileInfo))
+	b.WriteString(ui.BorderStyle.Render(" ║"))
 	b.WriteString("\n")
 
 	// Status indicator
 	var statusText string
 	if hunk.Decided {
 		if hunk.Accepted {
-			statusText = acceptedStyle.Render("✅ ACCEPTED")
+			statusText = ui.AcceptedStyle.Render("✅ ACCEPTED")
 		} else {
-			statusText = rejectedStyle.Render("❌ REJECTED")
+			statusText = ui.RejectedStyle.Render("❌ REJECTED")
 		}
 	} else {
-		statusText = pendingStyle.Render("⏳ PENDING")
+		statusText = ui.PendingStyle.Render("⏳ PENDING")
 	}
 	statusLine := padRight("Status: "+statusText, width-4)
-	b.WriteString(reviewBorderStyle.Render("║ "))
+	b.WriteString(ui.BorderStyle.Render("║ "))
 	b.WriteString(statusLine)
-	b.WriteString(reviewBorderStyle.Render(" ║"))
+	b.WriteString(ui.BorderStyle.Render(" ║"))
 	b.WriteString("\n")
 
 	// Separator
-	b.WriteString(reviewBorderStyle.Render("╠" + borderH + "╣"))
+	b.WriteString(ui.BorderStyle.Render("╠" + borderH + "╣"))
 	b.WriteString("\n")
 
 	// Context lines
 	for _, line := range hunk.Context {
 		ctxLine := padRight("  "+line, width-4)
-		b.WriteString(reviewBorderStyle.Render("║ "))
-		b.WriteString(contextLineStyle.Render(ctxLine))
-		b.WriteString(reviewBorderStyle.Render(" ║"))
+		b.WriteString(ui.BorderStyle.Render("║ "))
+		b.WriteString(ui.ContextLineStyle.Render(ctxLine))
+		b.WriteString(ui.BorderStyle.Render(" ║"))
 		b.WriteString("\n")
 	}
 
 	// Removed lines (old)
 	for _, line := range hunk.OldLines {
 		diffLine := padRight("- "+line, width-4)
-		b.WriteString(reviewBorderStyle.Render("║ "))
-		b.WriteString(removedLineStyle.Render(diffLine))
-		b.WriteString(reviewBorderStyle.Render(" ║"))
+		b.WriteString(ui.BorderStyle.Render("║ "))
+		b.WriteString(ui.RemovedLineStyle.Render(diffLine))
+		b.WriteString(ui.BorderStyle.Render(" ║"))
 		b.WriteString("\n")
 	}
 
 	// Added lines (new)
 	for _, line := range hunk.NewLines {
 		diffLine := padRight("+ "+line, width-4)
-		b.WriteString(reviewBorderStyle.Render("║ "))
-		b.WriteString(addedLineStyle.Render(diffLine))
-		b.WriteString(reviewBorderStyle.Render(" ║"))
+		b.WriteString(ui.BorderStyle.Render("║ "))
+		b.WriteString(ui.AddedLineStyle.Render(diffLine))
+		b.WriteString(ui.BorderStyle.Render(" ║"))
 		b.WriteString("\n")
 	}
 
 	// Separator
-	b.WriteString(reviewBorderStyle.Render("╠" + borderH + "╣"))
+	b.WriteString(ui.BorderStyle.Render("╠" + borderH + "╣"))
 	b.WriteString("\n")
 
 	// Help bar
 	helpText := "[y] Accept  [n] Reject  [s] Skip  [j/k] Navigate  [q] Quit & Apply"
 	helpText = padRight(helpText, width-4)
-	b.WriteString(reviewBorderStyle.Render("║ "))
-	b.WriteString(reviewHelpStyle.Render(helpText))
-	b.WriteString(reviewBorderStyle.Render(" ║"))
+	b.WriteString(ui.BorderStyle.Render("║ "))
+	b.WriteString(ui.HelpStyle.Render(helpText))
+	b.WriteString(ui.BorderStyle.Render(" ║"))
 	b.WriteString("\n")
 
 	// Footer
-	b.WriteString(reviewBorderStyle.Render("╚" + borderH + "╝"))
+	b.WriteString(ui.BorderStyle.Render("╚" + borderH + "╝"))
 	b.WriteString("\n")
 
 	// Progress summary
 	accepted, rejected, pending := m.countDecisions()
 	progressText := fmt.Sprintf("\n  Progress: %s %d accepted  %s %d rejected  %s %d pending\n",
-		acceptedStyle.Render("●"), accepted,
-		rejectedStyle.Render("●"), rejected,
-		pendingStyle.Render("●"), pending)
+		ui.AcceptedStyle.Render("●"), accepted,
+		ui.RejectedStyle.Render("●"), rejected,
+		ui.PendingStyle.Render("●"), pending)
 	b.WriteString(progressText)
 
 	return b.String()
@@ -401,24 +355,24 @@ func showReviewSummary(m reviewModel) {
 	accepted, rejected, pending := m.countDecisions()
 
 	fmt.Println()
-	fmt.Println(rackStyle.Render("[ 🧇 REVIEW COMPLETE ]"))
+	fmt.Println(ui.RackStyle.Render("[ 🧇 REVIEW COMPLETE ]"))
 	fmt.Println()
 
 	if accepted > 0 {
-		fmt.Printf("  %s %d hunk(s) accepted\n", acceptedStyle.Render("✅"), accepted)
+		fmt.Printf("  %s %d hunk(s) accepted\n", ui.AcceptedStyle.Render("✅"), accepted)
 		for _, h := range m.hunks {
 			if h.Accepted {
-				fmt.Printf("     └─ %s (line %d)\n", textAmber.Render(h.FilePath), h.StartLine)
+				fmt.Printf("     └─ %s (line %d)\n", ui.TextAmber.Render(h.FilePath), h.StartLine)
 			}
 		}
 	}
 
 	if rejected > 0 {
-		fmt.Printf("  %s %d hunk(s) rejected\n", rejectedStyle.Render("❌"), rejected)
+		fmt.Printf("  %s %d hunk(s) rejected\n", ui.RejectedStyle.Render("❌"), rejected)
 	}
 
 	if pending > 0 {
-		fmt.Printf("  %s %d hunk(s) skipped\n", pendingStyle.Render("⏳"), pending)
+		fmt.Printf("  %s %d hunk(s) skipped\n", ui.PendingStyle.Render("⏳"), pending)
 	}
 
 	fmt.Println()
@@ -426,7 +380,7 @@ func showReviewSummary(m reviewModel) {
 	// Apply patches if any accepted
 	if accepted > 0 {
 		// Ask for confirmation
-		fmt.Printf("%s Apply %d patch(es) to files? [y/n]: %s", ColorBold, accepted, ColorReset)
+		fmt.Printf("%s Apply %d patch(es) to files? [y/n]: %s", ui.Bold, accepted, ui.Reset)
 
 		var response string
 		fmt.Scanln(&response)
@@ -435,10 +389,10 @@ func showReviewSummary(m reviewModel) {
 		if response == "y" || response == "yes" {
 			applyAcceptedPatches(m.hunks)
 		} else {
-			fmt.Println(reviewHelpStyle.Render("  Patches not applied."))
+			fmt.Println(ui.HelpStyle.Render("  Patches not applied."))
 		}
 	} else {
-		fmt.Println(reviewHelpStyle.Render("  No patches to apply."))
+		fmt.Println(ui.HelpStyle.Render("  No patches to apply."))
 	}
 	fmt.Println()
 }
@@ -463,19 +417,19 @@ func applyAcceptedPatches(hunks []Hunk) {
 	}
 
 	fmt.Println()
-	fmt.Println(rackStyle.Render("[ 🍯 APPLYING PATCHES ]"))
+	fmt.Println(ui.RackStyle.Render("[ 🍯 APPLYING PATCHES ]"))
 	fmt.Println()
 
 	results := patch.ApplyAll(patchHunks)
 
 	for _, r := range results {
 		if r.Success {
-			fmt.Printf("  %s %s\n", acceptedStyle.Render("✅"), r.FilePath)
+			fmt.Printf("  %s %s\n", ui.AcceptedStyle.Render("✅"), r.FilePath)
 		} else {
-			fmt.Printf("  %s %s: %s\n", rejectedStyle.Render("❌"), r.FilePath, r.Error)
+			fmt.Printf("  %s %s: %s\n", ui.RejectedStyle.Render("❌"), r.FilePath, r.Error)
 		}
 	}
 
 	fmt.Println()
-	fmt.Println(successStyle.Render("  ✨ Patches applied successfully!"))
+	fmt.Println(ui.SuccessStyle.Render("  ✨ Patches applied successfully!"))
 }

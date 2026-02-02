@@ -1,15 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"math/big"
-	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
-	"github.com/waffle-studio/waffle/internal/config"
+	"github.com/waffle-studio/waffle/internal/cli"
 	"github.com/waffle-studio/waffle/internal/contracts"
+	"github.com/waffle-studio/waffle/internal/ui"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
 
@@ -27,75 +25,46 @@ var requestsCmd = &cobra.Command{
 }
 
 func displayRequests() {
-	fmt.Printf("%s⏳ Fetching requests...%s\n", ColorBlue, ColorReset)
+	cli.PrintLoading("Fetching requests...")
 
-	// Load config
-	cfg, err := config.Load()
+	// Bootstrap with full context
+	ctx, err := cli.BootstrapFull()
 	if err != nil {
-		fmt.Printf("%s❌ Failed to load config: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintError(err.Error())
+		cli.PrintConfigHint()
 		return
 	}
+	defer ctx.Close()
 
-	if cfg.PrivateKey == "" || cfg.BakeRegistry == "" {
-		fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
-		fmt.Println("  Please set PRIVATE_KEY and BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
-		return
-	}
-
-	// Connect to RPC
-	client, err := ethclient.Dial(cfg.RPCURL)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-	defer client.Close()
-
-	// Create registry instance
-	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to setup registry: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeoutCtx, cancel := cli.WithTimeout()
 	defer cancel()
 
 	// Get next request ID to know how many requests exist
-	nextID, err := registry.GetNextRequestID(ctx)
+	nextID, err := ctx.Registry.GetNextRequestID(timeoutCtx)
 	if err != nil {
-		fmt.Printf("%s❌ Failed to get request count: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintErrorf("Failed to get request count: %s", err)
 		return
 	}
 
+	const boxWidth = 68
+
 	if nextID.Cmp(big.NewInt(0)) == 0 {
-		fmt.Println()
-		fmt.Printf("%s╔════════════════════════════════════════════════════╗%s\n", ColorBlue, ColorReset)
-		fmt.Printf("%s║%s %sMY BAKE REQUESTS%s                                    %s║%s\n", ColorBlue, ColorReset, ColorAmber+ColorBold, ColorReset, ColorBlue, ColorReset)
-		fmt.Printf("%s╠════════════════════════════════════════════════════╣%s\n", ColorBlue, ColorReset)
-		fmt.Printf("%s║%s   No requests yet. Use 'waffle bake' to create one. %s║%s\n", ColorBlue, ColorReset, ColorBlue, ColorReset)
-		fmt.Printf("%s╚════════════════════════════════════════════════════╝%s\n", ColorBlue, ColorReset)
-		fmt.Println()
+		ui.RequestsHeader("MY BAKE REQUESTS", 54)
+		ui.RequestsRow(54, "  No requests yet. Use 'waffle bake' to create one.")
+		ui.RequestsFooter(54)
 		return
 	}
 
 	// Get wallet address for filtering
-	w, err := wallet.New(cfg)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to create wallet: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-	myAddress := w.Address()
+	myAddress := ctx.Wallet.Address()
 
 	// Display header
-	fmt.Println()
-	fmt.Printf("%s╔════════════════════════════════════════════════════════════════╗%s\n", ColorBlue, ColorReset)
-	fmt.Printf("%s║%s %sMY BAKE REQUESTS%s                                                %s║%s\n", ColorBlue, ColorReset, ColorAmber+ColorBold, ColorReset, ColorBlue, ColorReset)
-	fmt.Printf("%s╠════════════════════════════════════════════════════════════════╣%s\n", ColorBlue, ColorReset)
+	ui.RequestsHeader("MY BAKE REQUESTS", boxWidth)
 
 	// Iterate through all requests
 	foundCount := 0
 	for i := int64(0); i < nextID.Int64(); i++ {
-		req, err := registry.GetRequest(ctx, big.NewInt(i))
+		req, err := ctx.Registry.GetRequest(timeoutCtx, big.NewInt(i))
 		if err != nil {
 			continue
 		}
@@ -107,25 +76,8 @@ func displayRequests() {
 
 		foundCount++
 
-		// Format status
-		var statusIcon, statusText string
-		switch req.Status {
-		case contracts.StatusPending:
-			statusIcon = "⏳"
-			statusText = "\033[33mPENDING\033[0m  "
-		case contracts.StatusSubmitted:
-			statusIcon = "📝"
-			statusText = "\033[36mSUBMITTED\033[0m"
-		case contracts.StatusAccepted:
-			statusIcon = "✅"
-			statusText = "\033[32mACCEPTED\033[0m "
-		case contracts.StatusRejected:
-			statusIcon = "❌"
-			statusText = "\033[31mREJECTED\033[0m "
-		case contracts.StatusCancelled:
-			statusIcon = "🚫"
-			statusText = "\033[90mCANCELLED\033[0m"
-		}
+		// Format status using ui package
+		statusIcon, statusText := ui.FormatStatusWithIcon(req.Status)
 
 		// Format reward
 		rewardFloat := wallet.FormatTokenBalance(req.Reward, 18)
@@ -133,18 +85,34 @@ func displayRequests() {
 		// Format code hash (truncated)
 		codeHashHex := fmt.Sprintf("0x%x", req.CodeHash[:4])
 
-		fmt.Printf("%s║%s %s #%-3d  %s  %s%8.2f SYRUP%s  Hash: %s   %s║%s\n",
-			ColorBlue, ColorReset,
+		content := fmt.Sprintf("%s #%-3d  %s  %s%8.2f SYRUP%s  Hash: %s",
 			statusIcon, i, statusText,
-			ColorAmber, rewardFloat, ColorReset,
-			codeHashHex,
-			ColorBlue, ColorReset)
+			ui.Amber, rewardFloat, ui.Reset,
+			codeHashHex)
+		ui.RequestsRow(boxWidth, content)
 	}
 
 	if foundCount == 0 {
-		fmt.Printf("%s║%s   No requests found for your address.                          %s║%s\n", ColorBlue, ColorReset, ColorBlue, ColorReset)
+		ui.RequestsRow(boxWidth, "  No requests found for your address.")
 	}
 
-	fmt.Printf("%s╚════════════════════════════════════════════════════════════════╝%s\n", ColorBlue, ColorReset)
-	fmt.Println()
+	ui.RequestsFooter(boxWidth)
+}
+
+// mapStatusToUI converts contract status to ui status
+func mapStatusToUI(status uint8) uint8 {
+	switch status {
+	case contracts.StatusPending:
+		return ui.StatusPending
+	case contracts.StatusSubmitted:
+		return ui.StatusSubmitted
+	case contracts.StatusAccepted:
+		return ui.StatusAccepted
+	case contracts.StatusRejected:
+		return ui.StatusRejected
+	case contracts.StatusCancelled:
+		return ui.StatusCancelled
+	default:
+		return ui.StatusPending
+	}
 }

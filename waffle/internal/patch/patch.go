@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -58,13 +59,9 @@ func ApplyAll(hunks []Hunk) []Result {
 
 // sortHunksDescending sorts hunks by StartLine in descending order
 func sortHunksDescending(hunks []Hunk) {
-	for i := 0; i < len(hunks)-1; i++ {
-		for j := i + 1; j < len(hunks); j++ {
-			if hunks[i].StartLine < hunks[j].StartLine {
-				hunks[i], hunks[j] = hunks[j], hunks[i]
-			}
-		}
-	}
+	sort.Slice(hunks, func(i, j int) bool {
+		return hunks[i].StartLine > hunks[j].StartLine
+	})
 }
 
 // countLinesChanged counts total lines affected by hunks

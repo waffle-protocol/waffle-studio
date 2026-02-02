@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"math/big"
@@ -11,57 +10,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
-	"github.com/waffle-studio/waffle/internal/config"
+	"github.com/waffle-studio/waffle/internal/cli"
 	"github.com/waffle-studio/waffle/internal/contracts"
-)
-
-// ============================================================================
-// Styling - Server Rack Theme (Blue/Amber)
-// ============================================================================
-
-var (
-	// Color definitions
-	amberColor = lipgloss.Color("214") // Amber (#FFBF00)
-	blueColor  = lipgloss.Color("27")  // Blue  (#0000FF)
-
-	// Styles for the list
-	titleStyle = lipgloss.NewStyle().
-			Foreground(amberColor).
-			Bold(true).
-			MarginLeft(2)
-
-	itemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			PaddingLeft(4)
-
-	selectedItemStyle = lipgloss.NewStyle().
-				Foreground(amberColor).
-				Bold(true).
-				PaddingLeft(2)
-
-	paginationStyle = list.DefaultStyles().PaginationStyle.
-			Foreground(blueColor).
-			PaddingLeft(4)
-
-	helpStyle = list.DefaultStyles().HelpStyle.
-			Foreground(lipgloss.Color("241")).
-			PaddingLeft(4).
-			PaddingBottom(1)
-
-	// Styles for the baking result
-	rackStyle = lipgloss.NewStyle().
-			Foreground(blueColor).
-			Bold(true)
-
-	textAmber = lipgloss.NewStyle().
-			Foreground(amberColor)
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
-			Bold(true)
+	"github.com/waffle-studio/waffle/internal/ui"
 )
 
 // ============================================================================
@@ -131,10 +83,10 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	str := fmt.Sprintf("%s %s", icon, item.name)
 
 	// Apply styling based on selection
-	fn := itemStyle.Render
+	fn := ui.ItemStyle.Render
 	if index == m.Index() {
 		fn = func(s ...string) string {
-			return selectedItemStyle.Render("▶ " + strings.Join(s, " "))
+			return ui.SelectedItemStyle.Render("▶ " + strings.Join(s, " "))
 		}
 	}
 
@@ -183,9 +135,9 @@ func initialModel() model {
 	l.Title = "📂 Select a Code Recipe to Bake"
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
-	l.Styles.Title = titleStyle
-	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
+	l.Styles.Title = ui.TitleStyle
+	l.Styles.PaginationStyle = ui.PaginationStyle
+	l.Styles.HelpStyle = ui.HelpStyle
 
 	return model{list: l}
 }
@@ -248,11 +200,11 @@ func (m model) View() string {
 	if m.baking {
 		var b strings.Builder
 		b.WriteString("\n")
-		b.WriteString(rackStyle.Render("[ 🧇 BAKING ]"))
-		b.WriteString(textAmber.Render(fmt.Sprintf("  Processing '%s'...\n", m.selectedFile)))
-		b.WriteString(rackStyle.Render("[ 🍯 GLAZING ]"))
-		b.WriteString(textAmber.Render("  Applying patches...\n"))
-		b.WriteString(successStyle.Render("✨ Waffle is ready!\n"))
+		b.WriteString(ui.RackStyle.Render("[ 🧇 BAKING ]"))
+		b.WriteString(ui.TextAmber.Render(fmt.Sprintf("  Processing '%s'...\n", m.selectedFile)))
+		b.WriteString(ui.RackStyle.Render("[ 🍯 GLAZING ]"))
+		b.WriteString(ui.TextAmber.Render("  Applying patches...\n"))
+		b.WriteString(ui.SuccessStyle.Render("✨ Waffle is ready!\n"))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -268,41 +220,28 @@ func (m model) View() string {
 // handleBakeRequest handles the blockchain flow after file selection
 func handleBakeRequest(filePath string, reward float64) {
 	fmt.Println()
-	fmt.Println(rackStyle.Render("[ 🔗 BLOCKCHAIN ]"))
-	fmt.Printf("  %s Connecting to network...\n", textAmber.Render("⏳"))
+	fmt.Println(ui.RackStyle.Render("[ 🔗 BLOCKCHAIN ]"))
+	fmt.Printf("  %s Connecting to network...\n", ui.TextAmber.Render("⏳"))
 
-	// Load configuration
-	cfg, err := config.Load()
+	// Bootstrap with full context
+	ctx, err := cli.BootstrapFull()
 	if err != nil {
-		fmt.Printf("  %s Failed to load config: %s\n", "\033[31m❌\033[0m", err)
+		cli.PrintError(err.Error())
+		cli.PrintConfigHintFull()
 		return
 	}
+	defer ctx.Close()
 
-	if cfg.PrivateKey == "" || cfg.SyrupToken == "" || cfg.BakeRegistry == "" {
-		fmt.Printf("  %s Missing configuration\n", "\033[31m❌\033[0m")
-		fmt.Println("  Please set PRIVATE_KEY, SYRUP_TOKEN, BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
-		return
-	}
-
-	// Connect to RPC
-	client, err := ethclient.Dial(cfg.RPCURL)
-	if err != nil {
-		fmt.Printf("  %s Failed to connect: %s\n", "\033[31m❌\033[0m", err)
-		return
-	}
-	defer client.Close()
-
-	// Create registry instance
-	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
-	if err != nil {
-		fmt.Printf("  %s Failed to setup registry: %s\n", "\033[31m", err)
+	if ctx.Config.SyrupToken == "" {
+		cli.PrintError("SYRUP_TOKEN not configured")
+		cli.PrintConfigHintFull()
 		return
 	}
 
 	// Read file content for hashing
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Printf("  %s Failed to read file: %s\n", "\033[31m❌\033[0m", err)
+		cli.PrintErrorf("Failed to read file: %s", err)
 		return
 	}
 
@@ -315,35 +254,35 @@ func handleBakeRequest(filePath string, reward float64) {
 	rewardFloat.Mul(rewardFloat, decimals)
 	rewardFloat.Int(rewardWei)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeoutCtx, cancel := cli.WithTimeout()
 	defer cancel()
 
 	// Step 1: Approve SYRUP
-	fmt.Printf("  %s Approving %g SYRUP...\n", textAmber.Render("⏳"), reward)
+	fmt.Printf("  %s Approving %g SYRUP...\n", ui.TextAmber.Render("⏳"), reward)
 
-	approveReceipt, err := registry.ApproveToken(ctx, cfg.SyrupToken, rewardWei)
+	approveReceipt, err := ctx.Registry.ApproveToken(timeoutCtx, ctx.Config.SyrupToken, rewardWei)
 	if err != nil {
-		fmt.Printf("  %s Approve failed: %s\n", "\033[31m❌\033[0m", err)
+		cli.PrintErrorf("Approve failed: %s", err)
 		return
 	}
-	fmt.Printf("  %s Approved! Tx: %s\n", successStyle.Render("✅"), approveReceipt.TxHash.Hex()[:18]+"...")
+	fmt.Printf("  %s Approved! Tx: %s\n", ui.SuccessStyle.Render("✅"), approveReceipt.TxHash.Hex()[:18]+"...")
 
 	// Step 2: Create Request
-	fmt.Printf("  %s Creating request on BakeRegistry...\n", textAmber.Render("⏳"))
+	fmt.Printf("  %s Creating request on BakeRegistry...\n", ui.TextAmber.Render("⏳"))
 
-	receipt, requestID, err := registry.CreateRequest(ctx, codeHash, rewardWei)
+	receipt, requestID, err := ctx.Registry.CreateRequest(timeoutCtx, codeHash, rewardWei)
 	if err != nil {
-		fmt.Printf("  %s CreateRequest failed: %s\n", "\033[31m❌\033[0m", err)
+		cli.PrintErrorf("CreateRequest failed: %s", err)
 		return
 	}
 
 	fmt.Println()
-	fmt.Println(rackStyle.Render("[ 🧇 REQUEST CREATED ]"))
-	fmt.Printf("  %s Request ID: %s#%d%s\n", successStyle.Render("✅"), "\033[1m", requestID, "\033[0m")
+	fmt.Println(ui.RackStyle.Render("[ 🧇 REQUEST CREATED ]"))
+	fmt.Printf("  %s Request ID: %s#%d%s\n", ui.SuccessStyle.Render("✅"), ui.Bold, requestID, ui.Reset)
 	fmt.Printf("  💰 Reward: %g SYRUP (escrowed)\n", reward)
 	fmt.Printf("  📄 File: %s\n", filePath)
 	fmt.Printf("  🔗 Tx: %s\n", receipt.TxHash.Hex())
 	fmt.Println()
-	fmt.Println(successStyle.Render("  ✨ Waiting for a Baker to pick up your request!"))
+	fmt.Println(ui.SuccessStyle.Render("  ✨ Waiting for a Baker to pick up your request!"))
 	fmt.Println()
 }

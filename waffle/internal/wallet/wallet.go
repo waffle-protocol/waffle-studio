@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/waffle-studio/waffle/internal/config"
+	"github.com/waffle-studio/waffle/internal/erc20"
 )
 
 // Wallet represents an Ethereum wallet connected to an RPC endpoint
@@ -89,13 +90,10 @@ func (w *Wallet) GetETHBalance(ctx context.Context) (*big.Int, error) {
 	return w.client.BalanceAt(ctx, w.address, nil)
 }
 
-// ERC20 ABI for balanceOf
-const erc20BalanceOfABI = `[{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
-
 // GetTokenBalance returns the ERC-20 token balance for the wallet
 func (w *Wallet) GetTokenBalance(ctx context.Context, tokenAddress common.Address) (*big.Int, error) {
 	// Parse ABI
-	parsedABI, err := abi.JSON(strings.NewReader(erc20BalanceOfABI))
+	parsedABI, err := abi.JSON(strings.NewReader(erc20.BalanceOfABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}

@@ -1,17 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
-	"github.com/waffle-studio/waffle/internal/config"
+	"github.com/waffle-studio/waffle/internal/cli"
 	"github.com/waffle-studio/waffle/internal/contracts"
+	"github.com/waffle-studio/waffle/internal/ui"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
 
@@ -30,7 +28,7 @@ var submitCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		requestID, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			fmt.Printf("%s❌ Invalid request ID: %s%s\n", "\033[31m", args[0], ColorReset)
+			cli.PrintErrorf("Invalid request ID: %s", args[0])
 			return
 		}
 
@@ -40,7 +38,7 @@ var submitCmd = &cobra.Command{
 		}
 
 		if tokenUsage == 0 {
-			fmt.Printf("%s⚠️  Warning: Token usage not specified (using 0). Use --usage flag.%s\n", "\033[33m", ColorReset)
+			cli.PrintWarning("Token usage not specified (using 0). Use --usage flag.")
 		}
 
 		submitSolution(requestID, solutionHashStr, tokenUsage)
@@ -49,54 +47,36 @@ var submitCmd = &cobra.Command{
 
 func submitSolution(requestID int64, solutionHashStr string, usage uint64) {
 	fmt.Println()
-	fmt.Printf("%s⏳ Submitting solution for request #%d...%s\n", ColorBlue, requestID, ColorReset)
+	cli.PrintLoading(fmt.Sprintf("Submitting solution for request #%d...", requestID))
 
-	// Load config
-	cfg, err := config.Load()
+	// Bootstrap with registry
+	ctx, err := cli.BootstrapWithRegistry()
 	if err != nil {
-		fmt.Printf("%s❌ Failed to load config: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintError(err.Error())
+		cli.PrintConfigHint()
 		return
 	}
+	defer ctx.Close()
 
-	if cfg.PrivateKey == "" || cfg.BakeRegistry == "" {
-		fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
-		fmt.Println("  Please set PRIVATE_KEY and BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
-		return
-	}
-
-	// Connect
-	client, err := ethclient.Dial(cfg.RPCURL)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-	defer client.Close()
-
-	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
-	if err != nil {
-		fmt.Printf("%s❌ Failed to setup registry: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	timeoutCtx, cancel := cli.WithTimeout()
 	defer cancel()
 
 	// Check request status first
-	req, err := registry.GetRequest(ctx, big.NewInt(requestID))
+	req, err := ctx.Registry.GetRequest(timeoutCtx, big.NewInt(requestID))
 	if err != nil {
-		fmt.Printf("%s❌ Failed to get request: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintErrorf("Failed to get request: %s", err)
 		return
 	}
 
 	if req.Status != contracts.StatusPending {
-		fmt.Printf("%s❌ Can only submit solutions for PENDING requests (current status: %d)%s\n", "\033[31m", req.Status, ColorReset)
+		cli.PrintErrorf("Can only submit solutions for PENDING requests (current status: %d)", req.Status)
 		return
 	}
 
 	// Parse solution hash
 	solutionHashStr = strings.TrimPrefix(solutionHashStr, "0x")
 	if len(solutionHashStr) != 64 {
-		fmt.Printf("%s❌ Invalid solution hash length (expected 64 hex chars)%s\n", "\033[31m", ColorReset)
+		cli.PrintError("Invalid solution hash length (expected 64 hex chars)")
 		return
 	}
 
@@ -104,31 +84,31 @@ func submitSolution(requestID int64, solutionHashStr string, usage uint64) {
 	for i := 0; i < 32; i++ {
 		b, err := strconv.ParseUint(solutionHashStr[i*2:i*2+2], 16, 8)
 		if err != nil {
-			fmt.Printf("%s❌ Invalid solution hash format: %s%s\n", "\033[31m", err, ColorReset)
+			cli.PrintErrorf("Invalid solution hash format: %s", err)
 			return
 		}
 		solutionHash[i] = byte(b)
 	}
 
 	// Submit solution
-	receipt, err := registry.SubmitSolution(ctx, big.NewInt(requestID), solutionHash, big.NewInt(int64(usage)))
+	receipt, err := ctx.Registry.SubmitSolution(timeoutCtx, big.NewInt(requestID), solutionHash, big.NewInt(int64(usage)))
 	if err != nil {
-		fmt.Printf("%s❌ Submit failed: %s%s\n", "\033[31m", err, ColorReset)
+		cli.PrintErrorf("Submit failed: %s", err)
 		return
 	}
 
 	// Format reward
 	rewardFloat := wallet.FormatTokenBalance(req.Reward, 18)
 
+	// Display result box
+	box := ui.NewBox()
 	fmt.Println()
-	fmt.Printf("%s╔════════════════════════════════════════════════════╗%s\n", ColorBlue, ColorReset)
-	fmt.Printf("%s║%s %s🍳 SOLUTION SUBMITTED%s                               %s║%s\n", ColorBlue, ColorReset, ColorAmber+ColorBold, ColorReset, ColorBlue, ColorReset)
-	fmt.Printf("%s╠════════════════════════════════════════════════════╣%s\n", ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   Request ID: #%-37d%s║%s\n", ColorBlue, ColorReset, requestID, ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   🍯 Potential reward: %s%.2f SYRUP%s                  %s║%s\n", ColorBlue, ColorReset, ColorAmber, rewardFloat, ColorReset, ColorBlue, ColorReset)
-	fmt.Printf("%s║%s   🔗 Tx: %-42s %s║%s\n", ColorBlue, ColorReset, receipt.TxHash.Hex()[:42], ColorBlue, ColorReset)
-	fmt.Printf("%s╚════════════════════════════════════════════════════╝%s\n", ColorBlue, ColorReset)
+	box.Header("🍳 SOLUTION SUBMITTED")
+	box.Row(fmt.Sprintf("   Request ID: #%-37d", requestID))
+	box.Row(fmt.Sprintf("   🍯 Potential reward: %s%.2f SYRUP%s", ui.Amber, rewardFloat, ui.Reset))
+	box.Row(fmt.Sprintf("   🔗 Tx: %-42s", receipt.TxHash.Hex()[:42]))
+	box.Footer()
 	fmt.Println()
-	fmt.Printf("%s  ⏳ Waiting for requester to accept your solution...%s\n", ColorBlue, ColorReset)
+	fmt.Printf("%s  ⏳ Waiting for requester to accept your solution...%s\n", ui.Blue, ui.Reset)
 	fmt.Println()
 }
