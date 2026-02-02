@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/cobra"
+	"github.com/waffle-studio/waffle/internal/config"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
 
@@ -24,19 +25,23 @@ var balanceCmd = &cobra.Command{
 		fmt.Printf("%s⏳ Connecting to blockchain...%s\n", ColorBlue, ColorReset)
 
 		// Load configuration from environment
-		config, err := wallet.LoadConfig()
+		cfg, err := config.Load()
 		if err != nil {
 			fmt.Printf("%s❌ Error: %s%s\n", "\033[31m", err.Error(), ColorReset)
 			fmt.Println()
-			fmt.Println("Please set environment variables:")
-			fmt.Println("  export PRIVATE_KEY=0x...")
-			fmt.Println("  export SYRUP_TOKEN=0x...")
-			fmt.Println("  export RPC_URL=http://127.0.0.1:8545  (optional)")
+			fmt.Println("Please set PRIVATE_KEY and SYRUP_TOKEN in ~/.waffle/config.yaml or env vars.")
+			os.Exit(1)
+		}
+
+		if cfg.PrivateKey == "" || cfg.SyrupToken == "" {
+			fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
+			fmt.Println()
+			fmt.Println("Please set PRIVATE_KEY and SYRUP_TOKEN in ~/.waffle/config.yaml or env vars.")
 			os.Exit(1)
 		}
 
 		// Create wallet
-		w, err := wallet.New(config)
+		w, err := wallet.New(cfg)
 		if err != nil {
 			fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err.Error(), ColorReset)
 			os.Exit(1)
@@ -47,7 +52,7 @@ var balanceCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		tokenAddr := common.HexToAddress(config.SyrupToken)
+		tokenAddr := common.HexToAddress(cfg.SyrupToken)
 		balance, err := w.GetTokenBalance(ctx, tokenAddr)
 		if err != nil {
 			fmt.Printf("%s❌ Failed to get balance: %s%s\n", "\033[31m", err.Error(), ColorReset)

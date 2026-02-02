@@ -15,22 +15,22 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// BakeRegistry handles interaction with the BakeRegistry contract
-type BakeRegistry struct {
+// RegistryClient handles interaction with the BakeRegistry contract
+type RegistryClient struct {
 	address    common.Address
 	client     *ethclient.Client
 	privateKey []byte
 	chainID    *big.Int
 }
 
-// BakeRegistryABI is the ABI for BakeRegistry contract
-const BakeRegistryABI = `[
+// RegistryABI is the ABI for BakeRegistry contract
+const RegistryABI = `[
 	{"inputs":[{"name":"codeHash","type":"bytes32"},{"name":"reward","type":"uint256"}],"name":"createRequest","outputs":[{"name":"requestId","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
-	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"getRequest","outputs":[{"components":[{"name":"requester","type":"address"},{"name":"baker","type":"address"},{"name":"codeHash","type":"bytes32"},{"name":"solutionHash","type":"bytes32"},{"name":"reward","type":"uint256"},{"name":"createdAt","type":"uint256"},{"name":"status","type":"uint8"}],"name":"","type":"tuple"}],"stateMutability":"view","type":"function"},
+	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"getRequest","outputs":[{"components":[{"name":"requester","type":"address"},{"name":"baker","type":"address"},{"name":"codeHash","type":"bytes32"},{"name":"solutionHash","type":"bytes32"},{"name":"reward","type":"uint256"},{"name":"tokenUsage","type":"uint256"},{"name":"createdAt","type":"uint256"},{"name":"status","type":"uint8"}],"name":"","type":"tuple"}],"stateMutability":"view","type":"function"},
 	{"inputs":[],"name":"nextRequestId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
 	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"cancelRequest","outputs":[],"stateMutability":"nonpayable","type":"function"},
-	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"acceptSolution","outputs":[],"stateMutability":"nonpayable","type":"function"},
-	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
+	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"paymentAmount","type":"uint256"}],"name":"acceptSolution","outputs":[],"stateMutability":"nonpayable","type":"function"},
+	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"},{"name":"tokenUsage","type":"uint256"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]`
 
 // ERC20ApproveABI for approve function
@@ -38,8 +38,8 @@ const ERC20ApproveABI = `[
 	{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
 ]`
 
-// NewBakeRegistry creates a new BakeRegistry instance
-func NewBakeRegistry(address string, client *ethclient.Client, privateKeyHex string) (*BakeRegistry, error) {
+// NewRegistryClient creates a new BakeRegistry instance
+func NewRegistryClient(address string, client *ethclient.Client, privateKeyHex string) (*RegistryClient, error) {
 	keyHex := strings.TrimPrefix(privateKeyHex, "0x")
 	privateKey, err := crypto.HexToECDSA(keyHex)
 	if err != nil {
@@ -51,7 +51,7 @@ func NewBakeRegistry(address string, client *ethclient.Client, privateKeyHex str
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	return &BakeRegistry{
+	return &RegistryClient{
 		address:    common.HexToAddress(address),
 		client:     client,
 		privateKey: crypto.FromECDSA(privateKey),
@@ -66,7 +66,7 @@ func HashCode(content string) [32]byte {
 }
 
 // ApproveToken approves SYRUP tokens for the registry
-func (r *BakeRegistry) ApproveToken(ctx context.Context, tokenAddress string, amount *big.Int) (*types.Receipt, error) {
+func (r *RegistryClient) ApproveToken(ctx context.Context, tokenAddress string, amount *big.Int) (*types.Receipt, error) {
 	parsedABI, err := abi.JSON(strings.NewReader(ERC20ApproveABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
@@ -82,8 +82,8 @@ func (r *BakeRegistry) ApproveToken(ctx context.Context, tokenAddress string, am
 }
 
 // CreateRequest creates a new bake request on-chain
-func (r *BakeRegistry) CreateRequest(ctx context.Context, codeHash [32]byte, reward *big.Int) (*types.Receipt, *big.Int, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) CreateRequest(ctx context.Context, codeHash [32]byte, reward *big.Int) (*types.Receipt, *big.Int, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}
@@ -110,8 +110,8 @@ func (r *BakeRegistry) CreateRequest(ctx context.Context, codeHash [32]byte, rew
 }
 
 // getNextRequestID fetches the next request ID from contract
-func (r *BakeRegistry) getNextRequestID(ctx context.Context) (*big.Int, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) getNextRequestID(ctx context.Context) (*big.Int, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (r *BakeRegistry) getNextRequestID(ctx context.Context) (*big.Int, error) {
 }
 
 // GetNextRequestID is the public version
-func (r *BakeRegistry) GetNextRequestID(ctx context.Context) (*big.Int, error) {
+func (r *RegistryClient) GetNextRequestID(ctx context.Context) (*big.Int, error) {
 	return r.getNextRequestID(ctx)
 }
 
@@ -150,6 +150,7 @@ type BakeRequest struct {
 	CodeHash     [32]byte
 	SolutionHash [32]byte
 	Reward       *big.Int
+	TokenUsage   *big.Int
 	CreatedAt    *big.Int
 	Status       uint8
 }
@@ -164,8 +165,8 @@ const (
 )
 
 // GetRequest fetches a request by ID
-func (r *BakeRegistry) GetRequest(ctx context.Context, requestID *big.Int) (*BakeRequest, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) GetRequest(ctx context.Context, requestID *big.Int) (*BakeRequest, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +202,7 @@ func (r *BakeRegistry) GetRequest(ctx context.Context, requestID *big.Int) (*Bak
 		CodeHash     [32]byte       `json:"codeHash"`
 		SolutionHash [32]byte       `json:"solutionHash"`
 		Reward       *big.Int       `json:"reward"`
+		TokenUsage   *big.Int       `json:"tokenUsage"`
 		CreatedAt    *big.Int       `json:"createdAt"`
 		Status       uint8          `json:"status"`
 	})
@@ -214,14 +216,15 @@ func (r *BakeRegistry) GetRequest(ctx context.Context, requestID *big.Int) (*Bak
 		CodeHash:     tuple.CodeHash,
 		SolutionHash: tuple.SolutionHash,
 		Reward:       tuple.Reward,
+		TokenUsage:   tuple.TokenUsage,
 		CreatedAt:    tuple.CreatedAt,
 		Status:       tuple.Status,
 	}, nil
 }
 
 // CancelRequest cancels a pending request and refunds SYRUP
-func (r *BakeRegistry) CancelRequest(ctx context.Context, requestID *big.Int) (*types.Receipt, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) CancelRequest(ctx context.Context, requestID *big.Int) (*types.Receipt, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}
@@ -235,13 +238,13 @@ func (r *BakeRegistry) CancelRequest(ctx context.Context, requestID *big.Int) (*
 }
 
 // AcceptSolution accepts a submitted solution and pays the baker
-func (r *BakeRegistry) AcceptSolution(ctx context.Context, requestID *big.Int) (*types.Receipt, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) AcceptSolution(ctx context.Context, requestID *big.Int, paymentAmount *big.Int) (*types.Receipt, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}
 
-	data, err := parsedABI.Pack("acceptSolution", requestID)
+	data, err := parsedABI.Pack("acceptSolution", requestID, paymentAmount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack acceptSolution data: %w", err)
 	}
@@ -250,13 +253,13 @@ func (r *BakeRegistry) AcceptSolution(ctx context.Context, requestID *big.Int) (
 }
 
 // SubmitSolution submits a solution for a pending request (Baker function)
-func (r *BakeRegistry) SubmitSolution(ctx context.Context, requestID *big.Int, solutionHash [32]byte) (*types.Receipt, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(BakeRegistryABI))
+func (r *RegistryClient) SubmitSolution(ctx context.Context, requestID *big.Int, solutionHash [32]byte, tokenUsage *big.Int) (*types.Receipt, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ABI: %w", err)
 	}
 
-	data, err := parsedABI.Pack("submitSolution", requestID, solutionHash)
+	data, err := parsedABI.Pack("submitSolution", requestID, solutionHash, tokenUsage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack submitSolution data: %w", err)
 	}
@@ -265,7 +268,7 @@ func (r *BakeRegistry) SubmitSolution(ctx context.Context, requestID *big.Int, s
 }
 
 // sendTransaction sends a signed transaction
-func (r *BakeRegistry) sendTransaction(ctx context.Context, to *common.Address, data []byte) (*types.Receipt, error) {
+func (r *RegistryClient) sendTransaction(ctx context.Context, to *common.Address, data []byte) (*types.Receipt, error) {
 	privateKey, err := crypto.ToECDSA(r.privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)

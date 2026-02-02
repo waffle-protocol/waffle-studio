@@ -4,18 +4,21 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
+	"github.com/waffle-studio/waffle/internal/config"
 	"github.com/waffle-studio/waffle/internal/contracts"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
 
+var tokenUsage uint64
+
 func init() {
+	submitCmd.Flags().Uint64VarP(&tokenUsage, "usage", "u", 0, "Token usage for the solution")
 	rootCmd.AddCommand(submitCmd)
 }
 
@@ -36,37 +39,40 @@ var submitCmd = &cobra.Command{
 			solutionHashStr = "0x" + solutionHashStr
 		}
 
-		submitSolution(requestID, solutionHashStr)
+		if tokenUsage == 0 {
+			fmt.Printf("%s⚠️  Warning: Token usage not specified (using 0). Use --usage flag.%s\n", "\033[33m", ColorReset)
+		}
+
+		submitSolution(requestID, solutionHashStr, tokenUsage)
 	},
 }
 
-func submitSolution(requestID int64, solutionHashStr string) {
+func submitSolution(requestID int64, solutionHashStr string, usage uint64) {
 	fmt.Println()
 	fmt.Printf("%s⏳ Submitting solution for request #%d...%s\n", ColorBlue, requestID, ColorReset)
 
 	// Load config
-	privateKey := os.Getenv("PRIVATE_KEY")
-	rpcURL := os.Getenv("RPC_URL")
-	registryAddr := os.Getenv("BAKE_REGISTRY")
-
-	if privateKey == "" || registryAddr == "" {
-		fmt.Printf("%s❌ Missing environment variables%s\n", "\033[31m", ColorReset)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("%s❌ Failed to load config: %s%s\n", "\033[31m", err, ColorReset)
 		return
 	}
 
-	if rpcURL == "" {
-		rpcURL = "http://127.0.0.1:8545"
+	if cfg.PrivateKey == "" || cfg.BakeRegistry == "" {
+		fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
+		fmt.Println("  Please set PRIVATE_KEY and BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
+		return
 	}
 
 	// Connect
-	client, err := ethclient.Dial(rpcURL)
+	client, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err, ColorReset)
 		return
 	}
 	defer client.Close()
 
-	registry, err := contracts.NewBakeRegistry(registryAddr, client, privateKey)
+	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
 	if err != nil {
 		fmt.Printf("%s❌ Failed to setup registry: %s%s\n", "\033[31m", err, ColorReset)
 		return
@@ -105,7 +111,7 @@ func submitSolution(requestID int64, solutionHashStr string) {
 	}
 
 	// Submit solution
-	receipt, err := registry.SubmitSolution(ctx, big.NewInt(requestID), solutionHash)
+	receipt, err := registry.SubmitSolution(ctx, big.NewInt(requestID), solutionHash, big.NewInt(int64(usage)))
 	if err != nil {
 		fmt.Printf("%s❌ Submit failed: %s%s\n", "\033[31m", err, ColorReset)
 		return

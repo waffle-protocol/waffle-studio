@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
+	"github.com/waffle-studio/waffle/internal/config"
 	"github.com/waffle-studio/waffle/internal/contracts"
 	"github.com/waffle-studio/waffle/internal/wallet"
 )
@@ -30,22 +30,20 @@ func displayRequests() {
 	fmt.Printf("%s⏳ Fetching requests...%s\n", ColorBlue, ColorReset)
 
 	// Load config
-	privateKey := os.Getenv("PRIVATE_KEY")
-	rpcURL := os.Getenv("RPC_URL")
-	registryAddr := os.Getenv("BAKE_REGISTRY")
-
-	if privateKey == "" || registryAddr == "" {
-		fmt.Printf("%s❌ Missing environment variables%s\n", "\033[31m", ColorReset)
-		fmt.Println("  Please set: PRIVATE_KEY, BAKE_REGISTRY")
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("%s❌ Failed to load config: %s%s\n", "\033[31m", err, ColorReset)
 		return
 	}
 
-	if rpcURL == "" {
-		rpcURL = "http://127.0.0.1:8545"
+	if cfg.PrivateKey == "" || cfg.BakeRegistry == "" {
+		fmt.Printf("%s❌ Missing configuration%s\n", "\033[31m", ColorReset)
+		fmt.Println("  Please set PRIVATE_KEY and BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
+		return
 	}
 
 	// Connect to RPC
-	client, err := ethclient.Dial(rpcURL)
+	client, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		fmt.Printf("%s❌ Failed to connect: %s%s\n", "\033[31m", err, ColorReset)
 		return
@@ -53,7 +51,7 @@ func displayRequests() {
 	defer client.Close()
 
 	// Create registry instance
-	registry, err := contracts.NewBakeRegistry(registryAddr, client, privateKey)
+	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
 	if err != nil {
 		fmt.Printf("%s❌ Failed to setup registry: %s%s\n", "\033[31m", err, ColorReset)
 		return
@@ -81,12 +79,7 @@ func displayRequests() {
 	}
 
 	// Get wallet address for filtering
-	config, err := wallet.LoadConfig()
-	if err != nil {
-		fmt.Printf("%s❌ Failed to load wallet: %s%s\n", "\033[31m", err, ColorReset)
-		return
-	}
-	w, err := wallet.New(config)
+	w, err := wallet.New(cfg)
 	if err != nil {
 		fmt.Printf("%s❌ Failed to create wallet: %s%s\n", "\033[31m", err, ColorReset)
 		return

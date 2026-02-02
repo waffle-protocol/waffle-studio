@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -13,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/waffle-studio/waffle/internal/config"
 )
 
 // Wallet represents an Ethereum wallet connected to an RPC endpoint
@@ -23,41 +23,13 @@ type Wallet struct {
 	rpcURL     string
 }
 
-// Config holds wallet configuration from environment
-type Config struct {
-	PrivateKey string
-	RPCURL     string
-	SyrupToken string
-}
-
-// LoadConfig loads wallet configuration from environment variables
-func LoadConfig() (*Config, error) {
-	privateKey := os.Getenv("PRIVATE_KEY")
-	if privateKey == "" {
-		return nil, fmt.Errorf("PRIVATE_KEY environment variable not set")
-	}
-
-	rpcURL := os.Getenv("RPC_URL")
-	if rpcURL == "" {
-		rpcURL = "http://127.0.0.1:8545" // Default to local Anvil
-	}
-
-	syrupToken := os.Getenv("SYRUP_TOKEN")
-	if syrupToken == "" {
-		return nil, fmt.Errorf("SYRUP_TOKEN environment variable not set")
-	}
-
-	return &Config{
-		PrivateKey: privateKey,
-		RPCURL:     rpcURL,
-		SyrupToken: syrupToken,
-	}, nil
-}
-
 // New creates a new wallet from private key and connects to RPC
-func New(config *Config) (*Wallet, error) {
+func New(cfg *config.Config) (*Wallet, error) {
+	if cfg.PrivateKey == "" {
+		return nil, fmt.Errorf("private key not set")
+	}
 	// Remove 0x prefix if present
-	keyHex := strings.TrimPrefix(config.PrivateKey, "0x")
+	keyHex := strings.TrimPrefix(cfg.PrivateKey, "0x")
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(keyHex)
@@ -74,7 +46,10 @@ func New(config *Config) (*Wallet, error) {
 	address := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	// Connect to RPC
-	client, err := ethclient.Dial(config.RPCURL)
+	if cfg.RPCURL == "" {
+		cfg.RPCURL = "http://127.0.0.1:8545"
+	}
+	client, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
 	}
@@ -83,7 +58,7 @@ func New(config *Config) (*Wallet, error) {
 		privateKey: privateKey,
 		address:    address,
 		client:     client,
-		rpcURL:     config.RPCURL,
+		rpcURL:     cfg.RPCURL,
 	}, nil
 }
 
@@ -167,4 +142,20 @@ func FormatTokenBalance(balance *big.Int, decimals int) float64 {
 	f, _ := result.Float64()
 
 	return f
+}
+
+// ToWei converts float amount to BigInt with given decimals
+func ToWei(amount float64, decimals int) *big.Int {
+	// Create multiplier 10^decimals
+	multiplier := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+
+	// Convert float to big.Float
+	amountFl := big.NewFloat(amount)
+
+	// Multiply
+	resultFl := new(big.Float).Mul(amountFl, new(big.Float).SetInt(multiplier))
+
+	// Convert to Int
+	resultInt, _ := resultFl.Int(nil)
+	return resultInt
 }
