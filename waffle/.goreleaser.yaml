@@ -30,6 +30,7 @@ brews:
       owner: waffle-protocol
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    skip_upload: auto
     homepage: "https://github.com/waffle-protocol/waffle"
     description: "Decentralized marketplace for LLM tokens"
     license: "MIT"
