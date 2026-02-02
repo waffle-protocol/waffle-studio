@@ -29,17 +29,12 @@ type BootstrapOptions struct {
 func Bootstrap(opts BootstrapOptions) (*ClientContext, error) {
 	ctx := &ClientContext{}
 
-	// Load configuration
+	// Load configuration (auto-creates if needed)
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 	ctx.Config = cfg
-
-	// Validate required config fields
-	if cfg.PrivateKey == "" {
-		return nil, fmt.Errorf("PRIVATE_KEY not configured")
-	}
 
 	// Initialize wallet if needed
 	if opts.NeedWallet {
