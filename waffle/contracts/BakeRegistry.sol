@@ -31,6 +31,7 @@ contract BakeRegistry is ReentrancyGuard {
         bytes32 codeHash;       // Hash of code being baked
         bytes32 solutionHash;   // Hash of solution (if submitted)
         uint256 reward;         // SYRUP amount escrowed
+        uint256 tokenUsage;     // Usage reported by provider
         uint256 createdAt;      // Timestamp of creation
         RequestStatus status;   // Current status
     }
@@ -63,13 +64,15 @@ contract BakeRegistry is ReentrancyGuard {
     event SolutionSubmitted(
         uint256 indexed requestId,
         address indexed baker,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint256 tokenUsage
     );
 
     event SolutionAccepted(
         uint256 indexed requestId,
         address indexed baker,
-        uint256 reward
+        uint256 rewardPaid,
+        uint256 refundAmount
     );
 
     event SolutionRejected(
@@ -94,6 +97,7 @@ contract BakeRegistry is ReentrancyGuard {
     error NotSubmitted();
     error AlreadySubmitted();
     error CannotSubmitOwnRequest();
+    error InvalidPaymentAmount();
 
     // ============================================================================
     // Constructor
@@ -135,6 +139,7 @@ contract BakeRegistry is ReentrancyGuard {
             codeHash: codeHash,
             solutionHash: bytes32(0),
             reward: reward,
+            tokenUsage: 0,
             createdAt: block.timestamp,
             status: RequestStatus.PENDING
         });
@@ -148,8 +153,9 @@ contract BakeRegistry is ReentrancyGuard {
      * @dev Baker submits a solution for a pending request
      * @param requestId ID of the request
      * @param solutionHash Hash of the solution
+     * @param tokenUsage Token usage reported by provider
      */
-    function submitSolution(uint256 requestId, bytes32 solutionHash) 
+    function submitSolution(uint256 requestId, bytes32 solutionHash, uint256 tokenUsage) 
         external 
     {
         BakeRequest storage request = requests[requestId];
@@ -160,18 +166,20 @@ contract BakeRegistry is ReentrancyGuard {
 
         request.baker = msg.sender;
         request.solutionHash = solutionHash;
+        request.tokenUsage = tokenUsage;
         request.status = RequestStatus.SUBMITTED;
 
         bakerSubmissions[msg.sender].push(requestId);
 
-        emit SolutionSubmitted(requestId, msg.sender, solutionHash);
+        emit SolutionSubmitted(requestId, msg.sender, solutionHash, tokenUsage);
     }
 
     /**
      * @dev Requester accepts the solution and pays the Baker
      * @param requestId ID of the request
+     * @param paymentAmount Amount to pay the baker (must be <= escrowed reward)
      */
-    function acceptSolution(uint256 requestId) 
+    function acceptSolution(uint256 requestId, uint256 paymentAmount) 
         external 
         nonReentrant 
     {
@@ -179,13 +187,22 @@ contract BakeRegistry is ReentrancyGuard {
         
         if (request.requester != msg.sender) revert NotRequester();
         if (request.status != RequestStatus.SUBMITTED) revert NotSubmitted();
+        if (paymentAmount > request.reward) revert InvalidPaymentAmount();
 
         request.status = RequestStatus.ACCEPTED;
 
-        // Transfer escrowed SYRUP to Baker
-        syrupToken.safeTransfer(request.baker, request.reward);
+        // Transfer payment to Baker
+        if (paymentAmount > 0) {
+            syrupToken.safeTransfer(request.baker, paymentAmount);
+        }
 
-        emit SolutionAccepted(requestId, request.baker, request.reward);
+        // Refund remaining to Requester
+        uint256 refund = request.reward - paymentAmount;
+        if (refund > 0) {
+            syrupToken.safeTransfer(request.requester, refund);
+        }
+
+        emit SolutionAccepted(requestId, request.baker, paymentAmount, refund);
     }
 
     /**

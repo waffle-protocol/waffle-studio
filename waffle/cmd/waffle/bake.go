@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/spf13/cobra"
+	"github.com/waffle-studio/waffle/internal/config"
 	"github.com/waffle-studio/waffle/internal/contracts"
 )
 
@@ -270,24 +271,21 @@ func handleBakeRequest(filePath string, reward float64) {
 	fmt.Println(rackStyle.Render("[ 🔗 BLOCKCHAIN ]"))
 	fmt.Printf("  %s Connecting to network...\n", textAmber.Render("⏳"))
 
-	// Load environment variables
-	privateKey := os.Getenv("PRIVATE_KEY")
-	rpcURL := os.Getenv("RPC_URL")
-	syrupToken := os.Getenv("SYRUP_TOKEN")
-	registryAddr := os.Getenv("BAKE_REGISTRY")
-
-	if privateKey == "" || syrupToken == "" || registryAddr == "" {
-		fmt.Printf("  %s Missing environment variables\n", "\033[31m❌\033[0m")
-		fmt.Println("  Please set: PRIVATE_KEY, SYRUP_TOKEN, BAKE_REGISTRY")
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("  %s Failed to load config: %s\n", "\033[31m❌\033[0m", err)
 		return
 	}
 
-	if rpcURL == "" {
-		rpcURL = "http://127.0.0.1:8545"
+	if cfg.PrivateKey == "" || cfg.SyrupToken == "" || cfg.BakeRegistry == "" {
+		fmt.Printf("  %s Missing configuration\n", "\033[31m❌\033[0m")
+		fmt.Println("  Please set PRIVATE_KEY, SYRUP_TOKEN, BAKE_REGISTRY in ~/.waffle/config.yaml or env vars.")
+		return
 	}
 
 	// Connect to RPC
-	client, err := ethclient.Dial(rpcURL)
+	client, err := ethclient.Dial(cfg.RPCURL)
 	if err != nil {
 		fmt.Printf("  %s Failed to connect: %s\n", "\033[31m❌\033[0m", err)
 		return
@@ -295,9 +293,9 @@ func handleBakeRequest(filePath string, reward float64) {
 	defer client.Close()
 
 	// Create registry instance
-	registry, err := contracts.NewBakeRegistry(registryAddr, client, privateKey)
+	registry, err := contracts.NewRegistryClient(cfg.BakeRegistry, client, cfg.PrivateKey)
 	if err != nil {
-		fmt.Printf("  %s Failed to setup registry: %s\n", "\033[31m❌\033[0m", err)
+		fmt.Printf("  %s Failed to setup registry: %s\n", "\033[31m", err)
 		return
 	}
 
@@ -323,7 +321,7 @@ func handleBakeRequest(filePath string, reward float64) {
 	// Step 1: Approve SYRUP
 	fmt.Printf("  %s Approving %g SYRUP...\n", textAmber.Render("⏳"), reward)
 
-	approveReceipt, err := registry.ApproveToken(ctx, syrupToken, rewardWei)
+	approveReceipt, err := registry.ApproveToken(ctx, cfg.SyrupToken, rewardWei)
 	if err != nil {
 		fmt.Printf("  %s Approve failed: %s\n", "\033[31m❌\033[0m", err)
 		return
