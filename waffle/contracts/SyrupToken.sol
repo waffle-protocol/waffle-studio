@@ -35,4 +35,16 @@ contract SyrupToken is ERC20, Ownable {
     function burn(uint256 amount) external {
         _burn(msg.sender, amount);
     }
+
+    /**
+     * @dev Testnet faucet - anyone can claim 100 SYRUP once per address
+     * @notice Only for testnet use! Remove in production.
+     */
+    mapping(address => bool) public hasClaimed;
+
+    function faucet() external {
+        require(!hasClaimed[msg.sender], "Already claimed");
+        hasClaimed[msg.sender] = true;
+        _mint(msg.sender, 100 * 10 ** decimals());
+    }
 }

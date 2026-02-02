@@ -1,0 +1,50 @@
+version: 2
+
+project_name: waffle
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/waffle
+    binary: waffle
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - name: waffle
+    repository:
+      owner: waffle-protocol
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/waffle-protocol/waffle"
+    description: "Decentralized marketplace for LLM tokens"
+    license: "MIT"
+    folder: Formula
+    install: |
+      bin.install "waffle"
+    test: |
+      system "#{bin}/waffle", "--help"
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
