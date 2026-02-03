@@ -20,24 +20,17 @@ func (n *Node) SetupProvider(handler RequestHandler) {
 	n.Host.SetStreamHandler(ProtocolID, func(s network.Stream) {
 		defer s.Close()
 
-		// Read encrypted request
+		// Read request (libp2p already encrypts the stream via TLS/Noise)
 		reader := bufio.NewReader(s)
-		encryptedData, err := io.ReadAll(reader)
+		data, err := io.ReadAll(reader)
 		if err != nil {
 			fmt.Printf("Error reading request: %v\n", err)
 			return
 		}
 
-		// Decrypt request
-		decrypted, err := Decrypt(encryptedData, n.encKey)
-		if err != nil {
-			fmt.Printf("Error decrypting request: %v\n", err)
-			return
-		}
-
 		// Parse payload
 		var payload SyrupPayload
-		if err := json.Unmarshal(decrypted, &payload); err != nil {
+		if err := json.Unmarshal(data, &payload); err != nil {
 			fmt.Printf("Error parsing payload: %v\n", err)
 			return
 		}
@@ -49,12 +42,11 @@ func (n *Node) SetupProvider(handler RequestHandler) {
 			// Send error response
 			errPayload := SyrupPayload{Data: []byte(err.Error())}
 			errData, _ := json.Marshal(errPayload)
-			encrypted, _ := Encrypt(errData, n.encKey)
-			s.Write(encrypted)
+			s.Write(errData)
 			return
 		}
 
-		// Prepare response payload
+		// Prepare and send response
 		responsePayload := SyrupPayload{Data: result}
 		responseData, err := json.Marshal(responsePayload)
 		if err != nil {
@@ -62,26 +54,19 @@ func (n *Node) SetupProvider(handler RequestHandler) {
 			return
 		}
 
-		// Encrypt and send response
-		encrypted, err := Encrypt(responseData, n.encKey)
-		if err != nil {
-			fmt.Printf("Error encrypting response: %v\n", err)
-			return
-		}
-
-		s.Write(encrypted)
+		s.Write(responseData)
 	})
 }
 
 // SendRequest sends a request to a peer and waits for the response
-func (n *Node) SendRequest(ctx context.Context, peerID peer.ID, prompt string, fileData []byte) ([]byte, error) {
-	// Connect to peer
-	if err := n.Host.Connect(ctx, peer.AddrInfo{ID: peerID}); err != nil {
+func (n *Node) SendRequest(ctx context.Context, peerInfo peer.AddrInfo, prompt string, fileData []byte) ([]byte, error) {
+	// Connect to peer using full address info
+	if err := n.Host.Connect(ctx, peerInfo); err != nil {
 		return nil, fmt.Errorf("failed to connect to peer: %w", err)
 	}
 
-	// Open stream
-	s, err := n.Host.NewStream(ctx, peerID, ProtocolID)
+	// Open stream (libp2p already encrypts via TLS/Noise)
+	s, err := n.Host.NewStream(ctx, peerInfo.ID, ProtocolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open stream: %w", err)
 	}
@@ -97,34 +82,22 @@ func (n *Node) SendRequest(ctx context.Context, peerID peer.ID, prompt string, f
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Encrypt request
-	encrypted, err := Encrypt(payloadData, n.encKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt request: %w", err)
-	}
-
 	// Send request and close write side
-	if _, err := s.Write(encrypted); err != nil {
+	if _, err := s.Write(payloadData); err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	s.CloseWrite()
 
 	// Read response
 	reader := bufio.NewReader(s)
-	encryptedResponse, err := io.ReadAll(reader)
+	responseData, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Decrypt response
-	decrypted, err := Decrypt(encryptedResponse, n.encKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt response: %w", err)
-	}
-
 	// Parse response payload
 	var responsePayload SyrupPayload
-	if err := json.Unmarshal(decrypted, &responsePayload); err != nil {
+	if err := json.Unmarshal(responseData, &responsePayload); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

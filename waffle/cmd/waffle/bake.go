@@ -371,7 +371,7 @@ func handleLocalBake(filePath string) {
 	fmt.Printf("  %s Sending request to provider...\n", ui.TextAmber.Render("⏳"))
 
 	bgCtx := context.Background()
-	result, err := node.SendRequest(bgCtx, peers[0].ID, prompt, content)
+	result, err := node.SendRequest(bgCtx, peers[0], prompt, content)
 	if err != nil {
 		cli.PrintErrorf("Failed to send request: %s", err)
 		return
