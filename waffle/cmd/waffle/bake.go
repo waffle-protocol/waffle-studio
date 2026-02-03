@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"math/big"
@@ -13,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/cli"
 	"github.com/waffle-studio/waffle/internal/contracts"
+	"github.com/waffle-studio/waffle/internal/diff"
+	"github.com/waffle-studio/waffle/internal/p2p"
 	"github.com/waffle-studio/waffle/internal/ui"
 )
 
@@ -21,9 +25,11 @@ import (
 // ============================================================================
 
 var bakeReward float64
+var useLocal bool
 
 func init() {
 	bakeCmd.Flags().Float64VarP(&bakeReward, "reward", "r", 10.0, "SYRUP reward for bakers")
+	bakeCmd.Flags().BoolVar(&useLocal, "local", false, "Use local P2P provider instead of blockchain")
 	rootCmd.AddCommand(bakeCmd)
 }
 
@@ -42,9 +48,13 @@ var bakeCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Handle blockchain flow if file was selected
+		// Handle flow if file was selected
 		if m, ok := finalModel.(model); ok && m.baking && m.selectedFile != "" {
-			handleBakeRequest(m.selectedFile, bakeReward)
+			if useLocal {
+				handleLocalBake(m.selectedFile)
+			} else {
+				handleBakeRequest(m.selectedFile, bakeReward)
+			}
 		}
 	},
 }
@@ -284,5 +294,116 @@ func handleBakeRequest(filePath string, reward float64) {
 	fmt.Printf("  🔗 Tx: %s\n", receipt.TxHash.Hex())
 	fmt.Println()
 	fmt.Println(ui.SuccessStyle.Render("  ✨ Waiting for a Baker to pick up your request!"))
+	fmt.Println()
+}
+
+// ============================================================================
+// Local P2P Baking
+// ============================================================================
+
+// handleLocalBake handles the P2P local baking flow
+func handleLocalBake(filePath string) {
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 🔗 P2P LOCAL ]"))
+	fmt.Printf("  %s Initializing P2P node...\n", ui.TextAmber.Render("⏳"))
+
+	// Bootstrap wallet for encryption key
+	ctx, err := cli.BootstrapWithWallet()
+	if err != nil {
+		cli.PrintError(err.Error())
+		return
+	}
+	defer ctx.Close()
+
+	// Read file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		cli.PrintErrorf("Failed to read file: %s", err)
+		return
+	}
+
+	// Create P2P node
+	node, err := p2p.NewNode(p2p.NodeConfig{
+		PrivateKey: ctx.Config.PrivateKey,
+		ListenPort: 0,
+	})
+	if err != nil {
+		cli.PrintErrorf("Failed to create P2P node: %s", err)
+		return
+	}
+	defer node.Close()
+
+	fmt.Printf("  %s Node ID: %s\n", ui.SuccessStyle.Render("✅"), node.ID()[:16]+"...")
+
+	// Discover local providers
+	fmt.Printf("  %s Discovering local providers...\n", ui.TextAmber.Render("⏳"))
+	peers, err := node.DiscoverPeers(5 * time.Second)
+	if err != nil {
+		cli.PrintErrorf("Failed to discover peers: %s", err)
+		return
+	}
+
+	if len(peers) == 0 {
+		cli.PrintError("No local providers found. Start one with: waffle serve")
+		return
+	}
+
+	fmt.Printf("  %s Found %d provider(s)\n", ui.SuccessStyle.Render("✅"), len(peers))
+
+	// Get prompt from user
+	fmt.Println()
+	fmt.Print("  Enter your modification request: ")
+	reader := bufio.NewReader(os.Stdin)
+	prompt, err := reader.ReadString('\n')
+	if err != nil {
+		cli.PrintErrorf("Failed to read prompt: %s", err)
+		return
+	}
+	prompt = strings.TrimSpace(prompt)
+
+	if prompt == "" {
+		cli.PrintError("Prompt cannot be empty")
+		return
+	}
+
+	// Send request to first available provider
+	fmt.Println()
+	fmt.Printf("  %s Sending request to provider...\n", ui.TextAmber.Render("⏳"))
+
+	bgCtx := context.Background()
+	result, err := node.SendRequest(bgCtx, peers[0].ID, prompt, content)
+	if err != nil {
+		cli.PrintErrorf("Failed to send request: %s", err)
+		return
+	}
+
+	fmt.Printf("  %s Received response!\n", ui.SuccessStyle.Render("✅"))
+
+	// Show diff
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 📊 CHANGES ]"))
+	stats := diff.CalculateStats(string(content), string(result))
+	diff.PrintGitStyleStat(filePath, stats)
+	fmt.Println()
+	diff.PrintDiff(string(content), string(result))
+	diff.PrintSummary(stats)
+
+	// Confirm apply
+	fmt.Println()
+	fmt.Print("  Apply these changes? [y/N]: ")
+	confirm, _ := reader.ReadString('\n')
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+
+	if confirm == "y" || confirm == "yes" {
+		if err := os.WriteFile(filePath, result, 0644); err != nil {
+			cli.PrintErrorf("Failed to write file: %s", err)
+			return
+		}
+		fmt.Println()
+		fmt.Println(ui.SuccessStyle.Render("  ✨ Changes applied successfully!"))
+	} else {
+		fmt.Println()
+		fmt.Println(ui.TextAmber.Render("  Changes discarded."))
+	}
 	fmt.Println()
 }

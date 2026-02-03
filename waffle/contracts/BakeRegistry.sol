@@ -158,20 +158,94 @@ contract BakeRegistry is ReentrancyGuard {
     function submitSolution(uint256 requestId, bytes32 solutionHash, uint256 tokenUsage) 
         external 
     {
+        _submitSolution(requestId, solutionHash, tokenUsage, msg.sender);
+    }
+
+    /**
+     * @dev Submit solution via relay (gasless)
+     * @param requestId ID of the request
+     * @param solutionHash Hash of the solution
+     * @param tokenUsage Token usage reported by provider
+     * @param baker Address of the baker (signer)
+     * @param signature Signature of the baker
+     */
+    function submitSolutionGasless(
+        uint256 requestId, 
+        bytes32 solutionHash, 
+        uint256 tokenUsage, 
+        address baker,
+        bytes calldata signature
+    ) external {
+        // Verify signature
+        bytes32 messageHash = keccak256(abi.encodePacked("SubmitSolution(", toString(requestId), ",", toString(solutionHash), ",", toString(tokenUsage), ")"));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        
+        address signer = recoverSigner(ethSignedMessageHash, signature);
+        if (signer != baker) revert("Invalid signature");
+
+        _submitSolution(requestId, solutionHash, tokenUsage, baker);
+    }
+
+    function _submitSolution(uint256 requestId, bytes32 solutionHash, uint256 tokenUsage, address baker) internal {
         BakeRequest storage request = requests[requestId];
         
         if (request.requester == address(0)) revert RequestNotFound();
         if (request.status != RequestStatus.PENDING) revert NotPending();
-        if (request.requester == msg.sender) revert CannotSubmitOwnRequest();
+        if (request.requester == baker) revert CannotSubmitOwnRequest();
 
-        request.baker = msg.sender;
+        request.baker = baker;
         request.solutionHash = solutionHash;
         request.tokenUsage = tokenUsage;
         request.status = RequestStatus.SUBMITTED;
 
-        bakerSubmissions[msg.sender].push(requestId);
+        bakerSubmissions[baker].push(requestId);
 
-        emit SolutionSubmitted(requestId, msg.sender, solutionHash, tokenUsage);
+        emit SolutionSubmitted(requestId, baker, solutionHash, tokenUsage);
+    }
+
+    function recoverSigner(bytes32 _ethSignedMessageHash, bytes memory _signature)
+        internal
+        pure
+        returns (address)
+    {
+        (bytes32 r, bytes32 s, uint8 v) = splitSignature(_signature);
+        return ecrecover(_ethSignedMessageHash, v, r, s);
+    }
+
+    function splitSignature(bytes memory sig)
+        internal
+        pure
+        returns (bytes32 r, bytes32 s, uint8 v)
+    {
+        require(sig.length == 65, "invalid signature length");
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+    }
+
+    function toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
+        }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
+    }
+
+    function toString(bytes32 value) internal pure returns (string memory) {
+        return string(abi.encodePacked(value));
     }
 
     /**

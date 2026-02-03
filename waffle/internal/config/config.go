@@ -14,8 +14,9 @@ import (
 // Default testnet configuration
 const (
 	DefaultRPCURL       = "https://sepolia.base.org"
-	DefaultSyrupToken   = "0x497a760b88551f9d1957493d000651f0d473360b"
-	DefaultBakeRegistry = "0xf53ce337d2ec220e5c166be826bf14f8ef6da36e"
+	DefaultSyrupToken   = "0xb84284ddab9f7e2b14ba81c6f44db8d99488e23b"
+	DefaultBakeRegistry = "0x8c03552b7ae490ddc2e6b5a1b3452129e1135323"
+	DefaultRelayURL     = "https://relay.waffle.studio" // Gasless relay server
 )
 
 type Config struct {
@@ -23,6 +24,7 @@ type Config struct {
 	PrivateKey   string `yaml:"private_key"`
 	SyrupToken   string `yaml:"syrup_token"`
 	BakeRegistry string `yaml:"bake_registry"`
+	RelayURL     string `yaml:"relay_url"`
 	PricingRate  uint64 `yaml:"pricing_rate"` // Rate per character+usage
 }
 
@@ -82,6 +84,7 @@ func EnsureConfig() (*Config, bool, error) {
 		PrivateKey:   privateKey,
 		SyrupToken:   DefaultSyrupToken,
 		BakeRegistry: DefaultBakeRegistry,
+		RelayURL:     DefaultRelayURL,
 		PricingRate:  1,
 	}
 
