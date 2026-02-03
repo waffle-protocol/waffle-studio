@@ -44,6 +44,7 @@ const (
 	msgTypePaymentRequest = "payment_request"
 	msgTypePaymentProof   = "payment_proof"
 	msgTypePaymentFailed  = "payment_failed"
+	msgTypeResultRequest  = "result_request"
 	msgTypeResult         = "result"
 	msgTypeError          = "error"
 	erc20BalanceOfABI     = `[{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
@@ -88,6 +89,12 @@ type pendingResult struct {
 	encryptedResult []byte
 	tokenUsage      uint64
 	priceWei        *big.Int
+}
+
+type cachedResult struct {
+	encryptedResult []byte
+	tokenUsage      uint64
+	storedAt        time.Time
 }
 
 func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
@@ -358,8 +365,18 @@ func sendPayload(ctx context.Context, node host.Host, target peer.ID, payload Sy
 		return err
 	}
 	defer s.Close()
-	_, err = s.Write(jsonData)
-	return err
+	written := 0
+	for written < len(jsonData) {
+		n, err := s.Write(jsonData[written:])
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrUnexpectedEOF
+		}
+		written += n
+	}
+	return nil
 }
 
 func verifyPaymentTx(ctx context.Context, client *ethclient.Client, tokenAddress common.Address, providerAddress common.Address, txHash common.Hash, expected *big.Int) (bool, error) {
@@ -508,7 +525,7 @@ func main() {
 
 	ctx := context.Background()
 	var model *genai.GenerativeModel
-	responseChan := make(chan []byte)
+	responseChan := make(chan []byte, 16)
 	var payCfg *paymentConfig
 	var wallet *syrupWallet
 	var ethClient *ethclient.Client
@@ -516,6 +533,7 @@ func main() {
 	var providerAddress common.Address
 	var pricingRate uint64
 	pendingResults := make(map[string]pendingResult)
+	resultCache := make(map[string]cachedResult)
 	var pendingMu sync.Mutex
 
 	// ================= Provider 설정 =================
@@ -679,6 +697,13 @@ func main() {
 			encryptedResponse := encrypt([]byte(aiResult), []byte(aesKey))
 
 			if priceWei.Sign() == 0 {
+				pendingMu.Lock()
+				resultCache[payload.RequestID] = cachedResult{
+					encryptedResult: encryptedResponse,
+					tokenUsage:      tokenUsage,
+					storedAt:        time.Now(),
+				}
+				pendingMu.Unlock()
 				_ = sendPayload(ctx, node, s.Conn().RemotePeer(), SyrupPayload{
 					Type:       msgTypeResult,
 					RequestID:  payload.RequestID,
@@ -758,6 +783,11 @@ func main() {
 			}
 
 			pendingMu.Lock()
+			resultCache[payload.RequestID] = cachedResult{
+				encryptedResult: pending.encryptedResult,
+				tokenUsage:      pending.tokenUsage,
+				storedAt:        time.Now(),
+			}
 			delete(pendingResults, payload.RequestID)
 			pendingMu.Unlock()
 
@@ -771,6 +801,31 @@ func main() {
 			}
 			if payload.Error != "" {
 				fmt.Printf("❌ 결제 실패: %s\n", payload.Error)
+			}
+		case msgTypeResultRequest:
+			if payload.RequestID == "" {
+				return
+			}
+			pendingMu.Lock()
+			cached, ok := resultCache[payload.RequestID]
+			pendingMu.Unlock()
+			if !ok {
+				_ = sendPayload(ctx, node, s.Conn().RemotePeer(), SyrupPayload{
+					Type:      msgTypeError,
+					RequestID: payload.RequestID,
+					Error:     "결과 캐시 없음",
+				})
+				return
+			}
+			if err := sendPayload(ctx, node, s.Conn().RemotePeer(), SyrupPayload{
+				Type:       msgTypeResult,
+				RequestID:  payload.RequestID,
+				Data:       cached.encryptedResult,
+				TokenUsage: cached.tokenUsage,
+			}); err != nil {
+				fmt.Println("❌ 결과 재전송 실패:", err)
+			} else {
+				fmt.Println("🔁 결과 재전송됨!")
 			}
 		}
 	})
@@ -902,6 +957,7 @@ CollectionLoop:
 		var decryptedResult []byte
 		gotResult := false
 		abort := false
+		retryCount := 0
 
 		for {
 			respRaw := <-responseChan
@@ -982,6 +1038,15 @@ CollectionLoop:
 			case msgTypeResult:
 				decryptedResult = decrypt(respPayload.Data, []byte(aesKey))
 				if decryptedResult == nil {
+					if retryCount < 1 {
+						retryCount++
+						fmt.Println("❌ 응답 복호화 실패. 결과 재요청 중...")
+						_ = sendPayload(ctx, node, connectedPeer, SyrupPayload{
+							Type:      msgTypeResultRequest,
+							RequestID: requestID,
+						})
+						continue
+					}
 					fmt.Println("❌ 응답 복호화 실패")
 					abort = true
 					break
