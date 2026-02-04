@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -34,7 +35,6 @@ const RegistryABI = `[
 	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"},{"name":"tokenUsage","type":"uint256"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"},
 	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"rejectSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]`
-
 
 // NewRegistryClient creates a new BakeRegistry instance
 func NewRegistryClient(address string, client *ethclient.Client, privateKeyHex string) (*RegistryClient, error) {
@@ -280,7 +280,7 @@ func (r *RegistryClient) RejectSolution(ctx context.Context, requestID *big.Int)
 	return r.sendTransaction(ctx, &r.address, data)
 }
 
-// sendTransaction sends a signed transaction
+// sendTransaction sends a signed transaction with retry logic
 func (r *RegistryClient) sendTransaction(ctx context.Context, to *common.Address, data []byte) (*types.Receipt, error) {
 	privateKey, err := crypto.ToECDSA(r.privateKey)
 	if err != nil {
@@ -289,45 +289,72 @@ func (r *RegistryClient) sendTransaction(ctx context.Context, to *common.Address
 
 	fromAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
-	nonce, err := r.client.PendingNonceAt(ctx, fromAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nonce: %w", err)
+	var lastErr error
+	const maxRetries = 3
+
+	for i := 0; i < maxRetries; i++ {
+		// If this is a retry, wait a bit to let the node state sync
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(1 * time.Second):
+			}
+		}
+
+		nonce, err := r.client.PendingNonceAt(ctx, fromAddress)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get nonce: %w", err)
+			continue
+		}
+
+		gasPrice, err := r.client.SuggestGasPrice(ctx)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get gas price: %w", err)
+			continue
+		}
+
+		// Estimate gas
+		gasLimit, err := r.client.EstimateGas(ctx, ethereum.CallMsg{
+			From: fromAddress,
+			To:   to,
+			Data: data,
+		})
+		if err != nil {
+			gasLimit = 500000 // Default gas limit if estimation fails
+		}
+
+		// Create transaction
+		tx := types.NewTransaction(nonce, *to, big.NewInt(0), gasLimit, gasPrice, data)
+
+		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(r.chainID), privateKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign transaction: %w", err)
+		}
+
+		err = r.client.SendTransaction(ctx, signedTx)
+		if err != nil {
+			errMsg := err.Error()
+			// Check for nonce issues
+			if strings.Contains(errMsg, "replacement transaction underpriced") ||
+				strings.Contains(errMsg, "nonce too low") ||
+				strings.Contains(errMsg, "already known") {
+				lastErr = err
+				continue // Retry with new nonce/gas
+			}
+			return nil, fmt.Errorf("failed to send transaction: %w", err)
+		}
+
+		// Wait for receipt
+		receipt, err := waitForReceipt(ctx, r.client, signedTx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get receipt: %w", err)
+		}
+
+		return receipt, nil
 	}
 
-	gasPrice, err := r.client.SuggestGasPrice(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", err)
-	}
-
-	// Estimate gas
-	gasLimit, err := r.client.EstimateGas(ctx, ethereum.CallMsg{
-		From: fromAddress,
-		To:   to,
-		Data: data,
-	})
-	if err != nil {
-		gasLimit = 500000 // Default gas limit if estimation fails
-	}
-
-	tx := types.NewTransaction(nonce, *to, big.NewInt(0), gasLimit, gasPrice, data)
-
-	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(r.chainID), privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction: %w", err)
-	}
-
-	err = r.client.SendTransaction(ctx, signedTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send transaction: %w", err)
-	}
-
-	// Wait for receipt
-	receipt, err := waitForReceipt(ctx, r.client, signedTx.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get receipt: %w", err)
-	}
-
-	return receipt, nil
+	return nil, fmt.Errorf("failed to send transaction after %d attempts: %w", maxRetries, lastErr)
 }
 
 // waitForReceipt waits for transaction to be mined
