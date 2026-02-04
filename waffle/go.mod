@@ -9,6 +9,7 @@ require (
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/google/generative-ai-go v0.20.1
 	github.com/libp2p/go-libp2p v0.47.0
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.8.1
 	google.golang.org/api v0.264.0
@@ -75,7 +76,6 @@ require (
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/miekg/dns v1.1.66 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
