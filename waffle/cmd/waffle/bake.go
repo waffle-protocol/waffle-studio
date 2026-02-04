@@ -25,18 +25,16 @@ import (
 // ============================================================================
 
 var bakeReward float64
-var useLocal bool
 
 func init() {
 	bakeCmd.Flags().Float64VarP(&bakeReward, "reward", "r", 10.0, "SYRUP reward for bakers")
-	bakeCmd.Flags().BoolVar(&useLocal, "local", false, "Use local P2P provider instead of blockchain")
 	rootCmd.AddCommand(bakeCmd)
 }
 
 var bakeCmd = &cobra.Command{
 	Use:   "bake",
 	Short: "Select and bake a code recipe",
-	Long:  `Select a file from the current directory and process it as a Waffle recipe.`,
+	Long:  `Select a file from the current directory and process it as a Waffle recipe with P2P + blockchain integration.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Initialize the Bubble Tea program
 		p := tea.NewProgram(initialModel(), tea.WithAltScreen())
@@ -50,11 +48,7 @@ var bakeCmd = &cobra.Command{
 
 		// Handle flow if file was selected
 		if m, ok := finalModel.(model); ok && m.baking && m.selectedFile != "" {
-			if useLocal {
-				handleLocalBake(m.selectedFile)
-			} else {
-				handleBakeRequest(m.selectedFile, bakeReward)
-			}
+			handleIntegratedBake(m.selectedFile, bakeReward)
 		}
 	},
 }
@@ -224,16 +218,19 @@ func (m model) View() string {
 }
 
 // ============================================================================
-// Blockchain Integration
+// Integrated P2P + Blockchain Baking
 // ============================================================================
 
-// handleBakeRequest handles the blockchain flow after file selection
-func handleBakeRequest(filePath string, reward float64) {
-	fmt.Println()
-	fmt.Println(ui.RackStyle.Render("[ 🔗 BLOCKCHAIN ]"))
-	fmt.Printf("  %s Connecting to network...\n", ui.TextAmber.Render("⏳"))
+// handleIntegratedBake handles the integrated P2P + blockchain flow
+func handleIntegratedBake(filePath string, reward float64) {
+	reader := bufio.NewReader(os.Stdin)
 
-	// Bootstrap with full context
+	// ========== Phase 1: Initialize ==========
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 🔗 INITIALIZING ]"))
+	fmt.Printf("  %s Bootstrapping full context...\n", ui.TextAmber.Render("⏳"))
+
+	// Bootstrap with full context (wallet + blockchain)
 	ctx, err := cli.BootstrapFull()
 	if err != nil {
 		cli.PrintError(err.Error())
@@ -248,72 +245,7 @@ func handleBakeRequest(filePath string, reward float64) {
 		return
 	}
 
-	// Read file content for hashing
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		cli.PrintErrorf("Failed to read file: %s", err)
-		return
-	}
-
-	codeHash := contracts.HashCode(string(content))
-
-	// Convert reward to wei (18 decimals)
-	rewardWei := new(big.Int)
-	rewardFloat := new(big.Float).SetFloat64(reward)
-	decimals := new(big.Float).SetFloat64(1e18)
-	rewardFloat.Mul(rewardFloat, decimals)
-	rewardFloat.Int(rewardWei)
-
-	timeoutCtx, cancel := cli.WithTimeout()
-	defer cancel()
-
-	// Step 1: Approve SYRUP
-	fmt.Printf("  %s Approving %g SYRUP...\n", ui.TextAmber.Render("⏳"), reward)
-
-	approveReceipt, err := ctx.Registry.ApproveToken(timeoutCtx, ctx.Config.SyrupToken, rewardWei)
-	if err != nil {
-		cli.PrintErrorf("Approve failed: %s", err)
-		return
-	}
-	fmt.Printf("  %s Approved! Tx: %s\n", ui.SuccessStyle.Render("✅"), approveReceipt.TxHash.Hex()[:18]+"...")
-
-	// Step 2: Create Request
-	fmt.Printf("  %s Creating request on BakeRegistry...\n", ui.TextAmber.Render("⏳"))
-
-	receipt, requestID, err := ctx.Registry.CreateRequest(timeoutCtx, codeHash, rewardWei)
-	if err != nil {
-		cli.PrintErrorf("CreateRequest failed: %s", err)
-		return
-	}
-
-	fmt.Println()
-	fmt.Println(ui.RackStyle.Render("[ 🧇 REQUEST CREATED ]"))
-	fmt.Printf("  %s Request ID: %s#%d%s\n", ui.SuccessStyle.Render("✅"), ui.Bold, requestID, ui.Reset)
-	fmt.Printf("  💰 Reward: %g SYRUP (escrowed)\n", reward)
-	fmt.Printf("  📄 File: %s\n", filePath)
-	fmt.Printf("  🔗 Tx: %s\n", receipt.TxHash.Hex())
-	fmt.Println()
-	fmt.Println(ui.SuccessStyle.Render("  ✨ Waiting for a Baker to pick up your request!"))
-	fmt.Println()
-}
-
-// ============================================================================
-// Local P2P Baking
-// ============================================================================
-
-// handleLocalBake handles the P2P local baking flow
-func handleLocalBake(filePath string) {
-	fmt.Println()
-	fmt.Println(ui.RackStyle.Render("[ 🔗 P2P LOCAL ]"))
-	fmt.Printf("  %s Initializing P2P node...\n", ui.TextAmber.Render("⏳"))
-
-	// Bootstrap wallet for encryption key
-	ctx, err := cli.BootstrapWithWallet()
-	if err != nil {
-		cli.PrintError(err.Error())
-		return
-	}
-	defer ctx.Close()
+	fmt.Printf("  %s Connected to blockchain\n", ui.SuccessStyle.Render("✅"))
 
 	// Read file content
 	content, err := os.ReadFile(filePath)
@@ -321,6 +253,11 @@ func handleLocalBake(filePath string) {
 		cli.PrintErrorf("Failed to read file: %s", err)
 		return
 	}
+
+	// ========== Phase 2: P2P Provider Discovery ==========
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 📡 P2P DISCOVERY ]"))
+	fmt.Printf("  %s Creating P2P node...\n", ui.TextAmber.Render("⏳"))
 
 	// Create P2P node
 	node, err := p2p.NewNode(p2p.NodeConfig{
@@ -335,8 +272,8 @@ func handleLocalBake(filePath string) {
 
 	fmt.Printf("  %s Node ID: %s\n", ui.SuccessStyle.Render("✅"), node.ID()[:16]+"...")
 
-	// Discover local providers
-	fmt.Printf("  %s Discovering local providers...\n", ui.TextAmber.Render("⏳"))
+	// Discover providers
+	fmt.Printf("  %s Discovering providers...\n", ui.TextAmber.Render("⏳"))
 	peers, err := node.DiscoverPeers(5 * time.Second)
 	if err != nil {
 		cli.PrintErrorf("Failed to discover peers: %s", err)
@@ -344,16 +281,15 @@ func handleLocalBake(filePath string) {
 	}
 
 	if len(peers) == 0 {
-		cli.PrintError("No local providers found. Start one with: waffle serve")
+		cli.PrintError("No providers found. Start one with: waffle serve")
 		return
 	}
 
 	fmt.Printf("  %s Found %d provider(s)\n", ui.SuccessStyle.Render("✅"), len(peers))
 
-	// Get prompt from user
+	// ========== Phase 3: Get Prompt from User ==========
 	fmt.Println()
 	fmt.Print("  Enter your modification request: ")
-	reader := bufio.NewReader(os.Stdin)
 	prompt, err := reader.ReadString('\n')
 	if err != nil {
 		cli.PrintErrorf("Failed to read prompt: %s", err)
@@ -366,44 +302,179 @@ func handleLocalBake(filePath string) {
 		return
 	}
 
-	// Send request to first available provider
+	// ========== Phase 4: Create Blockchain Request (SYRUP Escrow) ==========
 	fmt.Println()
-	fmt.Printf("  %s Sending request to provider...\n", ui.TextAmber.Render("⏳"))
+	fmt.Println(ui.RackStyle.Render("[ 💰 BLOCKCHAIN ESCROW ]"))
 
-	bgCtx := context.Background()
-	result, err := node.SendRequest(bgCtx, peers[0], prompt, content)
+	codeHash := contracts.HashCode(string(content))
+
+	// Convert reward to wei (18 decimals)
+	rewardWei := new(big.Int)
+	rewardFloat := new(big.Float).SetFloat64(reward)
+	decimals := new(big.Float).SetFloat64(1e18)
+	rewardFloat.Mul(rewardFloat, decimals)
+	rewardFloat.Int(rewardWei)
+
+	timeoutCtx, cancel := cli.WithTimeout()
+	defer cancel()
+
+	// Approve SYRUP
+	fmt.Printf("  %s Approving %g SYRUP...\n", ui.TextAmber.Render("⏳"), reward)
+
+	approveReceipt, err := ctx.Registry.ApproveToken(timeoutCtx, ctx.Config.SyrupToken, rewardWei)
 	if err != nil {
-		cli.PrintErrorf("Failed to send request: %s", err)
+		cli.PrintErrorf("Approve failed: %s", err)
+		return
+	}
+	fmt.Printf("  %s Approved! Tx: %s\n", ui.SuccessStyle.Render("✅"), approveReceipt.TxHash.Hex()[:18]+"...")
+
+	// Create Request
+	fmt.Printf("  %s Creating request (escrowing SYRUP)...\n", ui.TextAmber.Render("⏳"))
+
+	_, requestID, err := ctx.Registry.CreateRequest(timeoutCtx, codeHash, rewardWei)
+	if err != nil {
+		cli.PrintErrorf("CreateRequest failed: %s", err)
 		return
 	}
 
-	fmt.Printf("  %s Received response!\n", ui.SuccessStyle.Render("✅"))
+	fmt.Printf("  %s Request #%d created (%.2f SYRUP escrowed)\n", ui.SuccessStyle.Render("✅"), requestID, reward)
 
-	// Show diff
+	// ========== Phase 5: Send P2P Request with RequestID ==========
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 🤖 AI PROCESSING ]"))
+	fmt.Printf("  %s Sending request to provider (Request #%d)...\n", ui.TextAmber.Render("⏳"), requestID)
+
+	bgCtx := context.Background()
+	response, err := node.SendRequestWithID(bgCtx, peers[0], prompt, content, requestID.Uint64())
+	if err != nil {
+		cli.PrintErrorf("Failed to send request: %s", err)
+		// Offer to cancel the blockchain request
+		fmt.Print("\n  Cancel blockchain request and get SYRUP refund? [y/N]: ")
+		cancelConfirm, _ := reader.ReadString('\n')
+		cancelConfirm = strings.TrimSpace(strings.ToLower(cancelConfirm))
+		if cancelConfirm == "y" || cancelConfirm == "yes" {
+			handleCancel(ctx, requestID)
+		}
+		return
+	}
+
+	fmt.Printf("  %s Received response from provider\n", ui.SuccessStyle.Render("✅"))
+	fmt.Printf("    Provider: %s\n", response.ProviderAddress)
+	fmt.Printf("    Tokens used: %d\n", response.TokenUsage)
+
+	// ========== Phase 6: Show Diff ==========
 	fmt.Println()
 	fmt.Println(ui.RackStyle.Render("[ 📊 CHANGES ]"))
-	stats := diff.CalculateStats(string(content), string(result))
+	stats := diff.CalculateStats(string(content), string(response.Data))
 	diff.PrintGitStyleStat(filePath, stats)
 	fmt.Println()
-	diff.PrintDiff(string(content), string(result))
+	diff.PrintDiff(string(content), string(response.Data))
 	diff.PrintSummary(stats)
 
-	// Confirm apply
+	// ========== Phase 7: Accept / Reject / Cancel ==========
 	fmt.Println()
-	fmt.Print("  Apply these changes? [y/N]: ")
-	confirm, _ := reader.ReadString('\n')
-	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	fmt.Println(ui.RackStyle.Render("[ ⚖️  DECISION ]"))
+	fmt.Println("  What would you like to do?")
+	fmt.Println("    [a] Accept - Apply changes & pay provider")
+	fmt.Println("    [r] Reject - Try another provider")
+	fmt.Println("    [c] Cancel - Discard & get SYRUP refund")
+	fmt.Println()
+	fmt.Print("  Your choice [a/r/c]: ")
 
-	if confirm == "y" || confirm == "yes" {
-		if err := os.WriteFile(filePath, result, 0644); err != nil {
-			cli.PrintErrorf("Failed to write file: %s", err)
-			return
-		}
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(strings.ToLower(choice))
+
+	switch choice {
+	case "a", "accept":
+		handleAccept(ctx, requestID, response, filePath, reward)
+
+	case "r", "reject":
+		handleReject(ctx, requestID)
+
+	case "c", "cancel":
+		handleCancel(ctx, requestID)
+
+	default:
 		fmt.Println()
-		fmt.Println(ui.SuccessStyle.Render("  ✨ Changes applied successfully!"))
-	} else {
-		fmt.Println()
-		fmt.Println(ui.TextAmber.Render("  Changes discarded."))
+		fmt.Println(ui.TextAmber.Render("  Invalid choice. Request remains pending."))
+		fmt.Printf("  You can manage it later with: waffle requests\n")
 	}
+
 	fmt.Println()
+}
+
+// handleAccept accepts the solution and pays the provider
+func handleAccept(ctx *cli.ClientContext, requestID *big.Int, response *p2p.SyrupPayload, filePath string, reward float64) {
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ ✅ ACCEPTING ]"))
+
+	// Calculate payment based on token usage
+	// Payment = min(reward, tokenUsage * rate)
+	paymentWei := new(big.Int)
+	paymentFloat := new(big.Float).SetFloat64(reward)
+	decimals := new(big.Float).SetFloat64(1e18)
+	paymentFloat.Mul(paymentFloat, decimals)
+	paymentFloat.Int(paymentWei)
+
+	timeoutCtx, cancel := cli.WithTimeout()
+	defer cancel()
+
+	fmt.Printf("  %s Accepting solution & paying provider...\n", ui.TextAmber.Render("⏳"))
+
+	_, err := ctx.Registry.AcceptSolution(timeoutCtx, requestID, paymentWei)
+	if err != nil {
+		cli.PrintErrorf("AcceptSolution failed: %s", err)
+		return
+	}
+
+	fmt.Printf("  %s Payment sent to provider!\n", ui.SuccessStyle.Render("✅"))
+
+	// Apply changes to file
+	if err := os.WriteFile(filePath, response.Data, 0644); err != nil {
+		cli.PrintErrorf("Failed to write file: %s", err)
+		return
+	}
+
+	fmt.Println()
+	fmt.Println(ui.SuccessStyle.Render("  ✨ Changes applied successfully!"))
+	fmt.Printf("  💰 Paid %.2f SYRUP to %s\n", reward, response.ProviderAddress[:10]+"...")
+}
+
+// handleReject rejects the solution (allows trying another provider)
+func handleReject(ctx *cli.ClientContext, requestID *big.Int) {
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ ❌ REJECTING ]"))
+
+	timeoutCtx, cancel := cli.WithTimeout()
+	defer cancel()
+
+	fmt.Printf("  %s Rejecting solution...\n", ui.TextAmber.Render("⏳"))
+
+	_, err := ctx.Registry.RejectSolution(timeoutCtx, requestID)
+	if err != nil {
+		cli.PrintErrorf("RejectSolution failed: %s", err)
+		return
+	}
+
+	fmt.Printf("  %s Solution rejected\n", ui.SuccessStyle.Render("✅"))
+	fmt.Println("  You can try another provider with: waffle bake")
+}
+
+// handleCancel cancels the request and refunds SYRUP
+func handleCancel(ctx *cli.ClientContext, requestID *big.Int) {
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ 🔙 CANCELLING ]"))
+
+	timeoutCtx, cancel := cli.WithTimeout()
+	defer cancel()
+
+	fmt.Printf("  %s Cancelling request & refunding SYRUP...\n", ui.TextAmber.Render("⏳"))
+
+	_, err := ctx.Registry.CancelRequest(timeoutCtx, requestID)
+	if err != nil {
+		cli.PrintErrorf("CancelRequest failed: %s", err)
+		return
+	}
+
+	fmt.Printf("  %s Request cancelled, SYRUP refunded!\n", ui.SuccessStyle.Render("✅"))
 }

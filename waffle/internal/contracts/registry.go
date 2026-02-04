@@ -31,7 +31,8 @@ const RegistryABI = `[
 	{"inputs":[],"name":"nextRequestId","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
 	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"cancelRequest","outputs":[],"stateMutability":"nonpayable","type":"function"},
 	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"paymentAmount","type":"uint256"}],"name":"acceptSolution","outputs":[],"stateMutability":"nonpayable","type":"function"},
-	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"},{"name":"tokenUsage","type":"uint256"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
+	{"inputs":[{"name":"requestId","type":"uint256"},{"name":"solutionHash","type":"bytes32"},{"name":"tokenUsage","type":"uint256"}],"name":"submitSolution","outputs":[],"stateMutability":"nonpayable","type":"function"},
+	{"inputs":[{"name":"requestId","type":"uint256"}],"name":"rejectSolution","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]`
 
 
@@ -259,6 +260,21 @@ func (r *RegistryClient) SubmitSolution(ctx context.Context, requestID *big.Int,
 	data, err := parsedABI.Pack("submitSolution", requestID, solutionHash, tokenUsage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack submitSolution data: %w", err)
+	}
+
+	return r.sendTransaction(ctx, &r.address, data)
+}
+
+// RejectSolution rejects a submitted solution (allows trying another provider)
+func (r *RegistryClient) RejectSolution(ctx context.Context, requestID *big.Int) (*types.Receipt, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(RegistryABI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ABI: %w", err)
+	}
+
+	data, err := parsedABI.Pack("rejectSolution", requestID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack rejectSolution data: %w", err)
 	}
 
 	return r.sendTransaction(ctx, &r.address, data)

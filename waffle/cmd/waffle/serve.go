@@ -41,6 +41,13 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer ctx.Close()
 
+	// Get provider wallet address
+	providerAddress := ctx.Config.GetAddress()
+	if providerAddress == "" {
+		cli.PrintError("Failed to get provider wallet address")
+		return
+	}
+
 	// Get Gemini API key
 	apiKey, err := ai.GetAPIKey()
 	if err != nil {
@@ -70,8 +77,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer node.Close()
 
-	// Setup provider handler
-	node.SetupProvider(func(prompt string, fileData []byte) ([]byte, error) {
+	// Setup provider handler with wallet address
+	node.SetupProvider(providerAddress, func(prompt string, fileData []byte) (*p2p.ProcessResult, error) {
 		fmt.Printf("\n  %s Received request\n", ui.TextAmber.Render(""))
 		fmt.Printf("    Prompt: %s\n", prompt)
 		fmt.Printf("    File size: %d bytes\n", len(fileData))
@@ -82,14 +89,18 @@ func runServe(cmd *cobra.Command, args []string) {
 			return nil, err
 		}
 
-		fmt.Printf("  %s Request processed\n", ui.SuccessStyle.Render(""))
-		return result, nil
+		fmt.Printf("  %s Request processed (tokens: %d)\n", ui.SuccessStyle.Render(""), result.TokenUsage)
+		return &p2p.ProcessResult{
+			Data:       result.Data,
+			TokenUsage: result.TokenUsage,
+		}, nil
 	})
 
 	// Print node info
 	fmt.Println()
 	fmt.Println(ui.RackStyle.Render("[ NODE INFO ]"))
 	fmt.Printf("  Peer ID: %s\n", node.ID())
+	fmt.Printf("  Wallet:  %s\n", providerAddress)
 	fmt.Println("  Addresses:")
 	for _, addr := range node.Addrs() {
 		fmt.Printf("    %s\n", addr)

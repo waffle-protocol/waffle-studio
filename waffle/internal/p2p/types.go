@@ -10,8 +10,12 @@ const (
 
 // SyrupPayload represents the encrypted payload structure for P2P communication
 type SyrupPayload struct {
-	Prompt string `json:"prompt,omitempty"`
-	Data   []byte `json:"data"`
+	Prompt          string `json:"prompt,omitempty"`
+	Data            []byte `json:"data"`
+	RequestID       uint64 `json:"request_id,omitempty"`       // Blockchain request ID
+	ProviderAddress string `json:"provider_address,omitempty"` // Provider's wallet address
+	TokenUsage      uint64 `json:"token_usage,omitempty"`      // AI token usage
+	Error           string `json:"error,omitempty"`            // Error message if any
 }
 
 // NodeConfig holds configuration for creating a new P2P node
