@@ -1,19 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"math/big"
-	"strings"
-	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/cli"
+	"github.com/waffle-studio/waffle/internal/relay"
+	"github.com/waffle-studio/waffle/internal/ui"
 )
 
 func init() {
@@ -22,19 +15,20 @@ func init() {
 
 var faucetCmd = &cobra.Command{
 	Use:   "faucet",
-	Short: "Claim 100 free SYRUP tokens (testnet only)",
-	Long:  `Claim 100 SYRUP tokens from the testnet faucet. Each address can only claim once.`,
+	Short: "Claim free ETH + SYRUP tokens via relay (testnet only)",
+	Long:  `Claim free testnet ETH and SYRUP tokens from the gasless relay server.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		claimFaucet()
 	},
 }
 
-const faucetABI = `[{"inputs":[],"name":"faucet","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
-
 func claimFaucet() {
-	cli.PrintLoading("Claiming SYRUP from faucet...")
+	fmt.Println()
+	fmt.Println(ui.RackStyle.Render("[ FAUCET ]"))
+	fmt.Printf("  %s Requesting tokens from relay...\n", ui.TextAmber.Render("⏳"))
 
-	ctx, err := cli.BootstrapFull()
+	// Bootstrap to get wallet address
+	ctx, err := cli.BootstrapWithWallet()
 	if err != nil {
 		cli.PrintError(err.Error())
 		cli.PrintConfigHint()
@@ -42,108 +36,44 @@ func claimFaucet() {
 	}
 	defer ctx.Close()
 
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Parse ABI
-	parsedABI, err := abi.JSON(strings.NewReader(faucetABI))
-	if err != nil {
-		cli.PrintErrorf("Failed to parse ABI: %s", err)
+	// Get wallet address
+	address := ctx.Config.GetAddress()
+	if address == "" {
+		cli.PrintError("Failed to get wallet address")
 		return
 	}
 
-	// Pack faucet call
-	data, err := parsedABI.Pack("faucet")
-	if err != nil {
-		cli.PrintErrorf("Failed to pack faucet data: %s", err)
+	fmt.Printf("  📬 Address: %s\n", address)
+
+	// Create relay client
+	relayClient := relay.NewClient(ctx.Config.RelayURL)
+
+	// Check relay health
+	if err := relayClient.Health(); err != nil {
+		cli.PrintErrorf("Relay server unavailable: %s", err)
+		fmt.Println()
+		fmt.Println("  💡 The relay server might be down or unreachable.")
+		fmt.Println("     You can get testnet ETH from: https://www.alchemy.com/faucets/base-sepolia")
 		return
 	}
 
-	// Get private key
-	keyHex := strings.TrimPrefix(ctx.Config.PrivateKey, "0x")
-	privateKey, err := crypto.HexToECDSA(keyHex)
-	if err != nil {
-		cli.PrintErrorf("Invalid private key: %s", err)
-		return
-	}
+	fmt.Printf("  %s Relay server connected\n", ui.SuccessStyle.Render("✅"))
+	fmt.Printf("  %s Sending ETH + SYRUP...\n", ui.TextAmber.Render("⏳"))
 
-	fromAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
-	tokenAddress := common.HexToAddress(ctx.Config.SyrupToken)
-
-	// Get nonce
-	nonce, err := ctx.Client.PendingNonceAt(timeoutCtx, fromAddress)
+	// Request faucet
+	resp, err := relayClient.Faucet(address)
 	if err != nil {
-		cli.PrintErrorf("Failed to get nonce: %s", err)
-		return
-	}
-
-	// Get gas price
-	gasPrice, err := ctx.Client.SuggestGasPrice(timeoutCtx)
-	if err != nil {
-		cli.PrintErrorf("Failed to get gas price: %s", err)
-		return
-	}
-
-	// Estimate gas
-	gasLimit, err := ctx.Client.EstimateGas(timeoutCtx, ethereum.CallMsg{
-		From: fromAddress,
-		To:   &tokenAddress,
-		Data: data,
-	})
-	if err != nil {
-		cli.PrintErrorf("Failed (already claimed or contract issue): %s", err)
-		return
-	}
-
-	// Get chain ID
-	chainID, err := ctx.Client.ChainID(timeoutCtx)
-	if err != nil {
-		cli.PrintErrorf("Failed to get chain ID: %s", err)
-		return
-	}
-
-	// Create and sign transaction
-	tx := types.NewTransaction(nonce, tokenAddress, big.NewInt(0), gasLimit, gasPrice, data)
-	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
-	if err != nil {
-		cli.PrintErrorf("Failed to sign transaction: %s", err)
-		return
-	}
-
-	// Send transaction
-	err = ctx.Client.SendTransaction(timeoutCtx, signedTx)
-	if err != nil {
-		cli.PrintErrorf("Failed to send transaction: %s", err)
+		cli.PrintErrorf("Faucet request failed: %s", err)
 		return
 	}
 
 	fmt.Println()
-	fmt.Printf("  ⏳ Transaction sent: %s\n", signedTx.Hash().Hex()[:20]+"...")
-	fmt.Println("  ⏳ Waiting for confirmation...")
-
-	// Wait for receipt
-	for {
-		receipt, err := ctx.Client.TransactionReceipt(timeoutCtx, signedTx.Hash())
-		if err == nil {
-			if receipt.Status == 1 {
-				fmt.Println()
-				fmt.Println("  ✅ Successfully claimed 100 SYRUP!")
-				fmt.Printf("  🔗 Tx: %s\n", signedTx.Hash().Hex())
-				fmt.Println()
-				fmt.Println("  Run 'waffle balance' to check your new balance.")
-				fmt.Println()
-			} else {
-				cli.PrintError("Transaction failed")
-			}
-			return
-		}
-
-		select {
-		case <-timeoutCtx.Done():
-			cli.PrintError("Timeout waiting for transaction")
-			return
-		case <-time.After(time.Second):
-			continue
-		}
-	}
+	fmt.Println(ui.RackStyle.Render("[ SUCCESS ]"))
+	fmt.Printf("  %s Received tokens!\n", ui.SuccessStyle.Render("✅"))
+	fmt.Printf("  ⛽ ETH:   %s (for gas)\n", resp.EthAmount)
+	fmt.Printf("  🍯 SYRUP: %s\n", resp.SyrupAmount)
+	fmt.Printf("  🔗 Tx:    %s\n", resp.TxHash[:20]+"...")
+	fmt.Println()
+	fmt.Println("  Run 'waffle balance' to check your new balance.")
+	fmt.Println()
 }
