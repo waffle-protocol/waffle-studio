@@ -103,6 +103,22 @@ func runServe(cmd *cobra.Command, args []string) {
 			tokenUsage := new(big.Int).SetUint64(result.TokenUsage)
 			reqID := new(big.Int).SetUint64(requestID)
 
+			// Debug: Check request status
+			req, err := ctx.Registry.GetRequest(context.Background(), reqID)
+			if err != nil {
+				fmt.Printf("  %s Failed to get request info: %s\n", ui.ErrorStyle.Render("❌"), err)
+			} else {
+				fmt.Printf("    Request State: Status=%d, Requester=%s\n", req.Status, req.Requester.Hex())
+				if req.Status != 0 {
+					fmt.Printf("  %s Error: Request is not PENDING (Status=%d)\n", ui.ErrorStyle.Render("❌"), req.Status)
+					return nil, fmt.Errorf("request is not pending")
+				}
+				if req.Requester.Hex() == providerAddress {
+					fmt.Printf("  %s Error: Cannot submit solution for own request\n", ui.ErrorStyle.Render("❌"))
+					return nil, fmt.Errorf("cannot submit own request")
+				}
+			}
+
 			timeoutCtx, cancel := cli.WithTimeout()
 			defer cancel()
 
