@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/ai"
 	"github.com/waffle-studio/waffle/internal/cli"
+	"github.com/waffle-studio/waffle/internal/contracts"
 	"github.com/waffle-studio/waffle/internal/p2p"
 	"github.com/waffle-studio/waffle/internal/ui"
 )
@@ -33,8 +35,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	fmt.Println(ui.RackStyle.Render("[ BAKER PROVIDER ]"))
 	fmt.Printf("  %s Initializing...\n", ui.TextAmber.Render(""))
 
-	// Bootstrap wallet for encryption key
-	ctx, err := cli.BootstrapWithWallet()
+	// Bootstrap full context (wallet + blockchain)
+	ctx, err := cli.BootstrapFull()
 	if err != nil {
 		cli.PrintError(err.Error())
 		return
@@ -78,18 +80,41 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer node.Close()
 
 	// Setup provider handler with wallet address
-	node.SetupProvider(providerAddress, func(prompt string, fileData []byte) (*p2p.ProcessResult, error) {
-		fmt.Printf("\n  %s Received request\n", ui.TextAmber.Render(""))
+	node.SetupProvider(providerAddress, func(prompt string, fileData []byte, requestID uint64) (*p2p.ProcessResult, error) {
+		fmt.Printf("\n  %s Received request #%d\n", ui.TextAmber.Render("📥"), requestID)
 		fmt.Printf("    Prompt: %s\n", prompt)
 		fmt.Printf("    File size: %d bytes\n", len(fileData))
 
+		// 1. Process with AI
+		fmt.Printf("  %s Processing with AI...\n", ui.TextAmber.Render("⏳"))
 		result, err := aiProvider.ProcessCode(bgCtx, prompt, fileData)
 		if err != nil {
-			fmt.Printf("  %s Error: %s\n", ui.ErrorStyle.Render(""), err)
+			fmt.Printf("  %s AI Error: %s\n", ui.ErrorStyle.Render("❌"), err)
 			return nil, err
 		}
 
-		fmt.Printf("  %s Request processed (tokens: %d)\n", ui.SuccessStyle.Render(""), result.TokenUsage)
+		// 2. Submit solution to blockchain (if requestID > 0)
+		if requestID > 0 {
+			fmt.Printf("  %s Submitting solution to blockchain...\n", ui.TextAmber.Render("⏳"))
+
+			// Calculate solution hash
+			solutionHash := contracts.HashCode(string(result.Data))
+			tokenUsage := new(big.Int).SetUint64(result.TokenUsage)
+			reqID := new(big.Int).SetUint64(requestID)
+
+			timeoutCtx, cancel := cli.WithTimeout()
+			defer cancel()
+
+			tx, err := ctx.Registry.SubmitSolution(timeoutCtx, reqID, solutionHash, tokenUsage)
+			if err != nil {
+				fmt.Printf("  %s Blockchain Error: %s\n", ui.ErrorStyle.Render("❌"), err)
+				return nil, err
+			}
+
+			fmt.Printf("  %s Solution submitted! Tx: %s\n", ui.SuccessStyle.Render("✅"), tx.TxHash.Hex()[:10]+"...")
+		}
+
+		fmt.Printf("  %s Request processed (tokens: %d)\n", ui.SuccessStyle.Render("✅"), result.TokenUsage)
 		return &p2p.ProcessResult{
 			Data:       result.Data,
 			TokenUsage: result.TokenUsage,

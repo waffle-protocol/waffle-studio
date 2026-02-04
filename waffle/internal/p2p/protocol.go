@@ -18,8 +18,8 @@ type ProcessResult struct {
 }
 
 // RequestHandler is called when a request is received from a peer
-// It receives the prompt and file data, and returns the processed result with token usage
-type RequestHandler func(prompt string, fileData []byte) (*ProcessResult, error)
+// It receives the prompt, file data, and requestID, and returns the processed result with token usage
+type RequestHandler func(prompt string, fileData []byte, requestID uint64) (*ProcessResult, error)
 
 // SetupProvider sets up the node as a provider that handles incoming requests
 // providerAddress is the provider's wallet address for blockchain payments
@@ -43,7 +43,7 @@ func (n *Node) SetupProvider(providerAddress string, handler RequestHandler) {
 		}
 
 		// Process request
-		result, err := handler(payload.Prompt, payload.Data)
+		result, err := handler(payload.Prompt, payload.Data, payload.RequestID)
 		if err != nil {
 			fmt.Printf("Error processing request: %v\n", err)
 			// Send error response
