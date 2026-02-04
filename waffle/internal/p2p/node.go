@@ -8,6 +8,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 // Node represents a P2P node in the Waffle network
@@ -97,12 +98,41 @@ func (n *Node) ID() string {
 	return n.Host.ID().String()
 }
 
+// ConnectToPeer connects to a peer manually
+func (n *Node) ConnectToPeer(ctx context.Context, peerAddr string) error {
+	// Parse multiaddress
+	maddr, err := multiaddr.NewMultiaddr(peerAddr)
+	if err != nil {
+		return fmt.Errorf("invalid multiaddress: %w", err)
+	}
+
+	// Extract peer ID
+	info, err := peer.AddrInfoFromP2pAddr(maddr)
+	if err != nil {
+		return fmt.Errorf("failed to get peer info: %w", err)
+	}
+
+	// Connect to peer
+	if err := n.Host.Connect(ctx, *info); err != nil {
+		return fmt.Errorf("failed to connect to peer: %w", err)
+	}
+
+	// Add to peer channel so discovery logic picks it up
+	// Use non-blocking send in case channel is full
+	select {
+	case n.PeerChan <- *info:
+	default:
+	}
+
+	return nil
+}
+
 // Addrs returns the node's multiaddresses as strings
 func (n *Node) Addrs() []string {
 	addrs := n.Host.Addrs()
 	result := make([]string, len(addrs))
 	for i, addr := range addrs {
-		result[i] = addr.String()
+		result[i] = fmt.Sprintf("%s/p2p/%s", addr.String(), n.ID())
 	}
 	return result
 }

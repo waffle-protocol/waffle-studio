@@ -25,9 +25,11 @@ import (
 // ============================================================================
 
 var bakeReward float64
+var bakePeer string
 
 func init() {
 	bakeCmd.Flags().Float64VarP(&bakeReward, "reward", "r", 10.0, "SYRUP reward for bakers")
+	bakeCmd.Flags().StringVar(&bakePeer, "peer", "", "P2P provider address to connect to directly")
 	rootCmd.AddCommand(bakeCmd)
 }
 
@@ -48,7 +50,7 @@ var bakeCmd = &cobra.Command{
 
 		// Handle flow if file was selected
 		if m, ok := finalModel.(model); ok && m.baking && m.selectedFile != "" {
-			handleIntegratedBake(m.selectedFile, bakeReward)
+			handleIntegratedBake(m.selectedFile, bakeReward, bakePeer)
 		}
 	},
 }
@@ -222,7 +224,7 @@ func (m model) View() string {
 // ============================================================================
 
 // handleIntegratedBake handles the integrated P2P + blockchain flow
-func handleIntegratedBake(filePath string, reward float64) {
+func handleIntegratedBake(filePath string, reward float64, peerAddr string) {
 	reader := bufio.NewReader(os.Stdin)
 
 	// ========== Phase 1: Initialize ==========
@@ -271,6 +273,16 @@ func handleIntegratedBake(filePath string, reward float64) {
 	defer node.Close()
 
 	fmt.Printf("  %s Node ID: %s\n", ui.SuccessStyle.Render("✅"), node.ID()[:16]+"...")
+
+	// Connect to manual peer if specified
+	if peerAddr != "" {
+		fmt.Printf("  %s Connecting to peer: %s...\n", ui.TextAmber.Render("⏳"), peerAddr)
+		if err := node.ConnectToPeer(context.Background(), peerAddr); err != nil {
+			cli.PrintErrorf("Failed to connect to peer: %s", err)
+			return
+		}
+		fmt.Printf("  %s Connected to peer!\n", ui.SuccessStyle.Render("✅"))
+	}
 
 	// Discover providers
 	fmt.Printf("  %s Discovering providers...\n", ui.TextAmber.Render("⏳"))
