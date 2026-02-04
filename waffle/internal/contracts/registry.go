@@ -362,14 +362,17 @@ func waitForReceipt(ctx context.Context, client *ethclient.Client, txHash common
 	for {
 		receipt, err := client.TransactionReceipt(ctx, txHash)
 		if err == nil {
+			if receipt.Status == 0 {
+				return receipt, fmt.Errorf("transaction reverted")
+			}
 			return receipt, nil
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		default:
-			// Keep polling
+		case <-time.After(1 * time.Second): // Poll every second
+			continue
 		}
 	}
 }

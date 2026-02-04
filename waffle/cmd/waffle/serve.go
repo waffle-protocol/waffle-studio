@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/waffle-studio/waffle/internal/ai"
@@ -112,6 +113,9 @@ func runServe(cmd *cobra.Command, args []string) {
 			}
 
 			fmt.Printf("  %s Solution submitted! Tx: %s\n", ui.SuccessStyle.Render("✅"), tx.TxHash.Hex()[:10]+"...")
+
+			// Start monitoring for payment in background
+			go monitorPayment(ctx, reqID)
 		}
 
 		fmt.Printf("  %s Request processed (tokens: %d)\n", ui.SuccessStyle.Render("✅"), result.TokenUsage)
@@ -142,4 +146,48 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	fmt.Println()
 	fmt.Println(ui.TextAmber.Render("  Shutting down..."))
+}
+
+// monitorPayment polls the registry for payment confirmation
+func monitorPayment(ctx *cli.ClientContext, requestID *big.Int) {
+	fmt.Printf("  %s Monitoring payment for Request #%s...\n", ui.TextAmber.Render("👀"), requestID.String())
+
+	// Poll for 5 minutes
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(5 * time.Minute)
+
+	for {
+		select {
+		case <-timeout:
+			fmt.Printf("\n  %s Payment monitoring timed out for Request #%s\n", ui.TextAmber.Render("⚠️"), requestID.String())
+			return
+		case <-ticker.C:
+			// Check request status
+			req, err := ctx.Registry.GetRequest(context.Background(), requestID)
+			if err != nil {
+				continue
+			}
+
+			// StatusAccepted = 2
+			if req.Status == 2 {
+				// Get token symbol (hardcoded as SYRUP for now)
+				amount := new(big.Float).SetInt(req.Reward)
+				decimals := new(big.Float).SetFloat64(1e18)
+				amountFloat, _ := new(big.Float).Quo(amount, decimals).Float64()
+
+				fmt.Printf("\n  %s Payment Received for Request #%s!\n", ui.SuccessStyle.Render("💰"), requestID.String())
+				fmt.Printf("    Amount: +%.2f SYRUP\n", amountFloat)
+				fmt.Printf("    From:   %s\n", req.Requester.Hex())
+				return
+			}
+
+			// StatusRejected = 3, StatusCancelled = 4
+			if req.Status == 3 || req.Status == 4 {
+				fmt.Printf("\n  %s Request #%s was rejected or cancelled.\n", ui.ErrorStyle.Render("❌"), requestID.String())
+				return
+			}
+		}
+	}
 }
