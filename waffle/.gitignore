@@ -1,0 +1,8 @@
+waffle
+dist/
+out/
+cache/
+broadcast/
+.env
+.env.local
+.env.testnet
