@@ -39,8 +39,14 @@ func NewGeminiProvider(ctx context.Context, apiKey string) (*GeminiProvider, err
 	}, nil
 }
 
-// ProcessCode sends the code and prompt to Gemini and returns the modified code
-func (p *GeminiProvider) ProcessCode(ctx context.Context, prompt string, content []byte) ([]byte, error) {
+// ProcessResult contains the processed code and token usage
+type ProcessResult struct {
+	Data       []byte
+	TokenUsage uint64
+}
+
+// ProcessCode sends the code and prompt to Gemini and returns the modified code with token usage
+func (p *GeminiProvider) ProcessCode(ctx context.Context, prompt string, content []byte) (*ProcessResult, error) {
 	// Build the user prompt
 	userPrompt := fmt.Sprintf("Code:\n```\n%s\n```\n\nRequest: %s", string(content), prompt)
 
@@ -60,7 +66,16 @@ func (p *GeminiProvider) ProcessCode(ctx context.Context, prompt string, content
 		return nil, fmt.Errorf("unexpected response type from Gemini")
 	}
 
-	return []byte(result), nil
+	// Calculate token usage from usage metadata
+	var tokenUsage uint64
+	if resp.UsageMetadata != nil {
+		tokenUsage = uint64(resp.UsageMetadata.TotalTokenCount)
+	}
+
+	return &ProcessResult{
+		Data:       []byte(result),
+		TokenUsage: tokenUsage,
+	}, nil
 }
 
 // Close releases resources held by the Gemini provider

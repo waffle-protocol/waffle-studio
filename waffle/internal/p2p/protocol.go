@@ -11,12 +11,19 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// ProcessResult contains the result of processing a request
+type ProcessResult struct {
+	Data       []byte // Processed data
+	TokenUsage uint64 // Number of AI tokens used
+}
+
 // RequestHandler is called when a request is received from a peer
-// It receives the prompt and file data, and returns the processed result
-type RequestHandler func(prompt string, fileData []byte) ([]byte, error)
+// It receives the prompt and file data, and returns the processed result with token usage
+type RequestHandler func(prompt string, fileData []byte) (*ProcessResult, error)
 
 // SetupProvider sets up the node as a provider that handles incoming requests
-func (n *Node) SetupProvider(handler RequestHandler) {
+// providerAddress is the provider's wallet address for blockchain payments
+func (n *Node) SetupProvider(providerAddress string, handler RequestHandler) {
 	n.Host.SetStreamHandler(ProtocolID, func(s network.Stream) {
 		defer s.Close()
 
@@ -40,14 +47,21 @@ func (n *Node) SetupProvider(handler RequestHandler) {
 		if err != nil {
 			fmt.Printf("Error processing request: %v\n", err)
 			// Send error response
-			errPayload := SyrupPayload{Data: []byte(err.Error())}
+			errPayload := SyrupPayload{
+				Error:           err.Error(),
+				ProviderAddress: providerAddress,
+			}
 			errData, _ := json.Marshal(errPayload)
 			s.Write(errData)
 			return
 		}
 
-		// Prepare and send response
-		responsePayload := SyrupPayload{Data: result}
+		// Prepare and send response with provider address and token usage
+		responsePayload := SyrupPayload{
+			Data:            result.Data,
+			ProviderAddress: providerAddress,
+			TokenUsage:      result.TokenUsage,
+		}
 		responseData, err := json.Marshal(responsePayload)
 		if err != nil {
 			fmt.Printf("Error marshaling response: %v\n", err)
@@ -59,7 +73,13 @@ func (n *Node) SetupProvider(handler RequestHandler) {
 }
 
 // SendRequest sends a request to a peer and waits for the response
-func (n *Node) SendRequest(ctx context.Context, peerInfo peer.AddrInfo, prompt string, fileData []byte) ([]byte, error) {
+// Returns the full SyrupPayload containing data, provider address, and token usage
+func (n *Node) SendRequest(ctx context.Context, peerInfo peer.AddrInfo, prompt string, fileData []byte) (*SyrupPayload, error) {
+	return n.SendRequestWithID(ctx, peerInfo, prompt, fileData, 0)
+}
+
+// SendRequestWithID sends a request with a blockchain request ID to a peer
+func (n *Node) SendRequestWithID(ctx context.Context, peerInfo peer.AddrInfo, prompt string, fileData []byte, requestID uint64) (*SyrupPayload, error) {
 	// Connect to peer using full address info
 	if err := n.Host.Connect(ctx, peerInfo); err != nil {
 		return nil, fmt.Errorf("failed to connect to peer: %w", err)
@@ -74,8 +94,9 @@ func (n *Node) SendRequest(ctx context.Context, peerInfo peer.AddrInfo, prompt s
 
 	// Prepare request payload
 	payload := SyrupPayload{
-		Prompt: prompt,
-		Data:   fileData,
+		Prompt:    prompt,
+		Data:      fileData,
+		RequestID: requestID,
 	}
 	payloadData, err := json.Marshal(payload)
 	if err != nil {
@@ -101,5 +122,10 @@ func (n *Node) SendRequest(ctx context.Context, peerInfo peer.AddrInfo, prompt s
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	return responsePayload.Data, nil
+	// Check for error in response
+	if responsePayload.Error != "" {
+		return nil, fmt.Errorf("provider error: %s", responsePayload.Error)
+	}
+
+	return &responsePayload, nil
 }

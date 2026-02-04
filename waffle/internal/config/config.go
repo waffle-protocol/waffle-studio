@@ -169,3 +169,23 @@ func Load() (*Config, error) {
 
 	return cfg, nil
 }
+
+// GetAddress derives the Ethereum address from the private key
+func (c *Config) GetAddress() string {
+	if c.PrivateKey == "" {
+		return ""
+	}
+
+	privateKey, err := crypto.HexToECDSA(c.PrivateKey)
+	if err != nil {
+		return ""
+	}
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return ""
+	}
+
+	return crypto.PubkeyToAddress(*publicKeyECDSA).Hex()
+}
