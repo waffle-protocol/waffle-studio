@@ -24,6 +24,11 @@ func GetAPIKey() (string, error) {
 		return "", err
 	}
 
+	// Check environment variable
+	if envKey := os.Getenv("GEMINI_API_KEY"); envKey != "" {
+		return envKey, nil
+	}
+
 	// Try to read existing key
 	data, err := os.ReadFile(keyPath)
 	if err == nil {
