@@ -286,7 +286,7 @@ func handleIntegratedBake(filePath string, reward float64, peerAddr string) {
 
 	// Discover providers
 	fmt.Printf("  %s Discovering providers...\n", ui.TextAmber.Render("⏳"))
-	peers, err := node.DiscoverPeers(5 * time.Second)
+	peers, err := node.DiscoverPeers(15 * time.Second)
 	if err != nil {
 		cli.PrintErrorf("Failed to discover peers: %s", err)
 		return
