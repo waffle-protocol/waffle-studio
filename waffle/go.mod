@@ -10,6 +10,7 @@ require (
 	github.com/google/generative-ai-go v0.20.1
 	github.com/libp2p/go-libp2p v0.47.0
 	github.com/mattn/go-runewidth v0.0.16
+	github.com/multiformats/go-multiaddr v0.16.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.8.1
 	google.golang.org/api v0.264.0
@@ -86,7 +87,6 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
-	github.com/multiformats/go-multiaddr v0.16.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.4.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
